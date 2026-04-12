@@ -1,0 +1,8 @@
+node_modules/
+dist/
+data/
+.env
+*.db
+ml/venv/
+scraper-service/venv/
+**/venv/

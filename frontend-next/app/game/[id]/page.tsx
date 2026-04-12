@@ -1,0 +1,924 @@
+'use client'
+
+import { useRouter } from 'next/navigation'
+import { useState, useEffect } from 'react'
+import { useQuery } from '@tanstack/react-query'
+import { useAnalysis } from '@/hooks/useGame'
+import { MarketBadge } from '@/components/signals/MarketBadge'
+import { PoissonHeatmap } from '@/components/game/PoissonHeatmap'
+import { FormPills } from '@/components/game/FormPills'
+import { StatRow } from '@/components/game/StatRow'
+import { XGChart } from '@/components/game/XGChart'
+import { Skeleton } from '@/components/ui/skeleton'
+import { cn } from '@/lib/utils'
+import {
+  fetchOdds, fetchManagers,
+  fetchCommentary, fetchHighlights, fetchH2HEvents,
+  fetchBestPlayers, fetchSquad, fetchShotmap, fetchVotes, fetchGraph, fetchPpm,
+  type H2HEvent, type OddsMarket, type SquadPlayer, type BestPlayer,
+} from '@/lib/api'
+import { AttackMomentum } from '@/components/game/AttackMomentum'
+import { MatchOverview } from '@/components/game/MatchOverview'
+import { PpmChart } from '@/components/game/PpmChart'
+import { CoachCard } from '@/components/game/CoachCard'
+
+function kickoffBRT(iso: string) {
+  return new Date(iso).toLocaleString('pt-BR', {
+    timeZone: 'America/Sao_Paulo',
+    day: '2-digit', month: '2-digit',
+    hour: '2-digit', minute: '2-digit',
+  })
+}
+
+// ── Collapsible Section ───────────────────────────────────────────────────────
+
+function Section({
+  title,
+  defaultOpen,
+  children,
+}: {
+  title: string
+  defaultOpen: boolean
+  children: React.ReactNode
+}) {
+  const [open, setOpen] = useState(defaultOpen)
+  return (
+    <div className="border border-border rounded-xl overflow-hidden">
+      <button
+        onClick={() => setOpen(o => !o)}
+        className="w-full flex items-center justify-between px-4 py-3 bg-card hover:bg-white/[0.02] transition-colors text-sm font-semibold"
+      >
+        {title}
+        <span className="text-muted-foreground text-xs">{open ? '▲' : '▼'}</span>
+      </button>
+      {open && <div className="px-4 pb-4 pt-2">{children}</div>}
+    </div>
+  )
+}
+
+// ── Live Stats section ────────────────────────────────────────────────────────
+
+interface LiveData {
+  status: string
+  minute?: string
+  clock?: {
+    minute?: number
+    display?: string
+    phase?: string
+    period?: number | null
+  }
+  homeScore: number
+  awayScore: number
+  events?: { type: string; minute: number; isHome: boolean; class?: string }[]
+}
+interface LiveStats { stats: { name: string; home: string | number | null; away: string | number | null }[] }
+
+function LiveSection({ gameId, homeTeam, awayTeam }: { gameId: string; homeTeam: string; awayTeam: string }) {
+  const [liveData, setLiveData] = useState<LiveData | null>(null)
+  const [liveStats, setLiveStats] = useState<LiveStats | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  const { data: graphData } = useQuery({
+    queryKey: ['graph', gameId],
+    queryFn: () => fetchGraph(gameId),
+    refetchInterval: 30_000,
+    staleTime: 25_000,
+  })
+
+  const { data: ppmData } = useQuery({
+    queryKey: ['ppm', gameId],
+    queryFn: () => fetchPpm(gameId),
+    refetchInterval: 30_000,
+    staleTime: 25_000,
+  })
+
+  useEffect(() => {
+    const fetchLiveData = async () => {
+      try {
+        const [liveRes, statsRes] = await Promise.all([
+          fetch(`/api/game/${gameId}/live`, { cache: 'no-store' }),
+          fetch(`/api/game/${gameId}/live-stats`, { cache: 'no-store' }),
+        ])
+        setLiveData(await liveRes.json())
+        setLiveStats(await statsRes.json())
+      } catch { /* ignore */ } finally { setLoading(false) }
+    }
+    fetchLiveData()
+    const interval = setInterval(fetchLiveData, 30000)
+    return () => clearInterval(interval)
+  }, [gameId])
+
+  const liveAvailable = liveData && liveData.status !== 'unavailable'
+  const liveStatus = String(liveData?.status ?? '').toLowerCase()
+  const coachLive = ['inprogress', 'live', 'halftime', 'pause', 'overtime', 'penaltyshootout'].includes(liveStatus)
+
+  if (loading) return <div className="space-y-3"><Skeleton className="h-8" /><Skeleton className="h-8" /><Skeleton className="h-8" /></div>
+
+  return (
+    <div className="space-y-4">
+      {liveAvailable ? (
+        <div className="flex items-center justify-center gap-6 py-4 bg-emerald-500/10 rounded-xl">
+          <div className="text-center">
+            <p className="text-xs text-muted-foreground mb-1">{homeTeam}</p>
+            <p className="text-3xl font-bold font-mono tabular-nums">{liveData!.homeScore}</p>
+          </div>
+          <div className="text-center">
+            <p className="text-lg font-mono text-muted-foreground">{(liveData!.clock?.display ?? liveData!.minute) || 'LIVE'}</p>
+          </div>
+          <div className="text-center">
+            <p className="text-xs text-muted-foreground mb-1">{awayTeam}</p>
+            <p className="text-3xl font-bold font-mono tabular-nums">{liveData!.awayScore}</p>
+          </div>
+        </div>
+      ) : (
+        <p className="text-sm text-muted-foreground text-center py-2">Placar não disponível</p>
+      )}
+      {graphData && graphData.points.length > 0 && (
+        <>
+          <AttackMomentum
+            points={graphData.points}
+            homeTeam={homeTeam}
+            awayTeam={awayTeam}
+            periodTime={graphData.periodTime}
+            events={(liveData?.events ?? [])
+              .filter(e => e.minute != null && ['goal', 'shotOnGoal', 'shot', 'corner', 'card'].includes(e.type))
+              .map(e => ({
+                type: e.type as 'goal' | 'shotOnGoal' | 'shot' | 'corner' | 'card',
+                minute: e.minute,
+                isHome: e.isHome,
+                cardClass: e.type === 'card' ? (e.class as 'yellow' | 'red' | 'yellowRed' | undefined) : undefined,
+              }))
+            }
+          />
+          {ppmData && ppmData.blocks.length > 0 && (
+            <PpmChart
+              blocks={ppmData.blocks}
+              signal={ppmData.signal}
+              homeTeam={homeTeam}
+              awayTeam={awayTeam}
+            />
+          )}
+        </>
+      )}
+      <CoachCard gameId={gameId} isLive={coachLive} />
+      {liveAvailable && (
+        liveStats?.stats && liveStats.stats.length > 0 ? (
+          <div className="space-y-2">
+            {liveStats.stats.map((stat, i) => (
+              <div key={i} className="flex items-center text-sm">
+                <span className="w-24 text-muted-foreground text-right pr-2">{stat.home}</span>
+                <span className="flex-1 text-center text-muted-foreground text-xs">{stat.name}</span>
+                <span className="w-24 text-right pl-2 font-mono">{stat.away}</span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-center text-muted-foreground text-sm py-2">Estatísticas não disponíveis</p>
+        )
+      )}
+    </div>
+  )
+}
+
+// ── H2H section ───────────────────────────────────────────────────────────────
+
+function H2HSection({ gameId, homeTeam, awayTeam }: { gameId: string; homeTeam: string; awayTeam: string }) {
+  const { data, isLoading } = useQuery({
+    queryKey: ['h2h', gameId],
+    queryFn: () => fetchH2HEvents(gameId),
+    staleTime: 5 * 60_000,
+    enabled: true,
+  })
+
+  if (isLoading) return <div className="space-y-2"><Skeleton className="h-8" /><Skeleton className="h-8" /><Skeleton className="h-8" /></div>
+
+  const events: H2HEvent[] = data?.events ?? []
+  if (!events.length) return (
+    <div className="flex flex-col items-center justify-center py-8 text-center gap-2">
+      <p className="text-2xl opacity-20">⊞</p>
+      <p className="text-sm text-muted-foreground">Nenhum confronto direto encontrado</p>
+    </div>
+  )
+
+  const homeKey = homeTeam.toLowerCase().split(' ')[0]
+  const homeWins = events.filter(e => {
+    const isHome = e.homeTeam.toLowerCase().includes(homeKey)
+    return isHome ? (e.homeScore ?? 0) > (e.awayScore ?? 0) : (e.awayScore ?? 0) > (e.homeScore ?? 0)
+  }).length
+  const draws = events.filter(e => e.homeScore === e.awayScore).length
+  const awayWins = events.length - homeWins - draws
+
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-3 text-center py-3 bg-white/5 rounded-xl">
+        <div>
+          <p className="text-xl font-bold text-sky-400">{homeWins}</p>
+          <p className="text-xs text-muted-foreground mt-0.5 truncate px-1">{homeTeam}</p>
+        </div>
+        <div>
+          <p className="text-xl font-bold text-muted-foreground">{draws}</p>
+          <p className="text-xs text-muted-foreground mt-0.5">Empates</p>
+        </div>
+        <div>
+          <p className="text-xl font-bold text-orange-400">{awayWins}</p>
+          <p className="text-xs text-muted-foreground mt-0.5 truncate px-1">{awayTeam}</p>
+        </div>
+      </div>
+      <div className="space-y-1">
+        {events.map((e, i) => (
+          <div key={i} className="flex items-center gap-2 text-xs py-1.5 border-b border-border/40 last:border-0">
+            <span className="text-muted-foreground w-20 shrink-0">{e.date}</span>
+            <div className="flex items-center gap-1.5 flex-1 justify-center">
+              <span className="truncate max-w-[70px] text-right">{e.homeTeam}</span>
+              <span className="font-mono font-bold tabular-nums px-1.5 py-0.5 bg-white/8 rounded text-xs">
+                {e.homeScore ?? '?'} – {e.awayScore ?? '?'}
+              </span>
+              <span className="truncate max-w-[70px]">{e.awayTeam}</span>
+            </div>
+            <span className="text-xs text-muted-foreground/50 shrink-0 truncate max-w-[60px]">{e.tournament}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// ── Odds section ──────────────────────────────────────────────────────────────
+
+function fractionalToDecimal(frac: string): string {
+  try {
+    const [n, d] = frac.split('/').map(Number)
+    return (n / d + 1).toFixed(2)
+  } catch { return frac }
+}
+
+function OddsSection({ gameId }: { gameId: string }) {
+  const { data, isLoading } = useQuery({
+    queryKey: ['odds', gameId],
+    queryFn: () => fetchOdds(gameId),
+    staleTime: 2 * 60_000,
+    enabled: true,
+  })
+
+  if (isLoading) return <div className="space-y-2"><Skeleton className="h-10" /><Skeleton className="h-10" /><Skeleton className="h-10" /></div>
+
+  const markets: OddsMarket[] = data?.markets ?? []
+  if (!markets.length) return <p className="text-sm text-muted-foreground text-center py-4">Odds não disponíveis</p>
+
+  const priority = ['Full time', 'Both teams to score', 'Asian handicap', 'Double chance', 'Draw no bet', 'Goals', 'Over/Under']
+  const sorted = [...markets].sort((a, b) => {
+    const ai = priority.findIndex(p => a.marketName.toLowerCase().includes(p.toLowerCase()))
+    const bi = priority.findIndex(p => b.marketName.toLowerCase().includes(p.toLowerCase()))
+    return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi)
+  })
+
+  return (
+    <div className="space-y-3 max-h-[480px] overflow-y-auto">
+      {sorted.slice(0, 15).map((market, mi) => (
+        <div key={mi}>
+          <p className="text-xs text-muted-foreground uppercase tracking-widest mb-1.5">{market.marketName}</p>
+          <div className="grid gap-1" style={{ gridTemplateColumns: `repeat(${Math.min(market.choices.length, 4)}, 1fr)` }}>
+            {market.choices.slice(0, 4).map((choice, ci) => (
+              <div key={ci} className={cn(
+                'flex flex-col items-center py-2 px-1 rounded-lg border text-xs',
+                choice.winning ? 'border-emerald-500/50 bg-emerald-500/10' : 'border-border bg-white/4'
+              )}>
+                <span className="text-muted-foreground text-xs mb-1 truncate w-full text-center">{choice.name}</span>
+                <span className="font-mono font-bold tabular-nums">{fractionalToDecimal(choice.fractionalValue)}</span>
+                {choice.change !== undefined && choice.change !== 0 && (
+                  <span className={cn('text-xs mt-0.5', choice.change > 0 ? 'text-emerald-400' : 'text-red-400')}>
+                    {choice.change > 0 ? '↑' : '↓'}
+                  </span>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+// ── Squad / Lineups section ───────────────────────────────────────────────────
+
+function SquadSection({ gameId, homeTeam, awayTeam }: { gameId: string; homeTeam: string; awayTeam: string }) {
+  const { data: homeSquad, isLoading: hLoading } = useQuery({
+    queryKey: ['squad', gameId, 'home'],
+    queryFn: () => fetchSquad(gameId, 'home'),
+    staleTime: 10 * 60_000,
+    enabled: true,
+  })
+  const { data: awaySquad, isLoading: aLoading } = useQuery({
+    queryKey: ['squad', gameId, 'away'],
+    queryFn: () => fetchSquad(gameId, 'away'),
+    staleTime: 10 * 60_000,
+    enabled: true,
+  })
+
+  if (hLoading || aLoading) return <div className="space-y-2"><Skeleton className="h-8" /><Skeleton className="h-8" /><Skeleton className="h-8" /></div>
+
+  const posOrder: Record<string, number> = { G: 0, D: 1, M: 2, F: 3 }
+  const posLabel: Record<string, string> = { G: 'GK', D: 'DEF', M: 'MID', F: 'FWD' }
+
+  function renderSquad(players: SquadPlayer[], teamName: string, color: string) {
+    if (!players.length) return <p className="text-xs text-muted-foreground text-center py-4">Indisponível</p>
+    const sorted = [...players].sort((a, b) => (posOrder[a.position] ?? 9) - (posOrder[b.position] ?? 9))
+    const grouped = sorted.reduce((acc, p) => {
+      const pos = p.position ?? '?'
+      if (!acc[pos]) acc[pos] = []
+      acc[pos].push(p)
+      return acc
+    }, {} as Record<string, SquadPlayer[]>)
+
+    return (
+      <div>
+        <p className={cn('text-xs font-semibold uppercase tracking-widest mb-2', color)}>{teamName}</p>
+        {Object.entries(grouped).map(([pos, ps]) => (
+          <div key={pos} className="mb-2">
+            <p className="text-xs text-muted-foreground/50 uppercase tracking-widest mb-1">{posLabel[pos] ?? pos}</p>
+            {ps.map((p) => (
+              <div key={p.id} className="flex items-center justify-between py-0.5 border-b border-border/20 last:border-0">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs text-muted-foreground w-4 text-center font-mono">{p.jerseyNumber}</span>
+                  <span className="text-xs">{p.shortName ?? p.name}</span>
+                </div>
+                {p.marketValue && (
+                  <span className="text-xs text-muted-foreground font-mono">
+                    {p.marketValue >= 1_000_000
+                      ? `€${(p.marketValue / 1_000_000).toFixed(1)}M`
+                      : `€${(p.marketValue / 1000).toFixed(0)}K`}
+                  </span>
+                )}
+              </div>
+            ))}
+          </div>
+        ))}
+      </div>
+    )
+  }
+
+  return (
+    <div className="grid grid-cols-2 gap-4 text-sm max-h-[480px] overflow-y-auto">
+      {renderSquad(homeSquad?.players ?? [], homeTeam, 'text-sky-400')}
+      {renderSquad(awaySquad?.players ?? [], awayTeam, 'text-orange-400')}
+    </div>
+  )
+}
+
+// ── Commentary section ────────────────────────────────────────────────────────
+
+function CommentarySection({ gameId }: { gameId: string }) {
+  const { data, isLoading } = useQuery({
+    queryKey: ['commentary', gameId],
+    queryFn: () => fetchCommentary(gameId),
+    staleTime: 2 * 60_000,
+    enabled: true,
+  })
+
+  if (isLoading) return <div className="space-y-2"><Skeleton className="h-6" /><Skeleton className="h-6" /><Skeleton className="h-6" /></div>
+
+  const comments = data?.comments ?? []
+  if (!comments.length) return (
+    <div className="flex flex-col items-center justify-center py-8 text-center gap-2">
+      <p className="text-2xl opacity-20">💬</p>
+      <p className="text-sm text-muted-foreground">Comentários não disponíveis</p>
+    </div>
+  )
+
+  return (
+    <div className="space-y-1.5 max-h-[400px] overflow-y-auto">
+      {comments.slice(0, 40).map((c, i) => (
+        <div key={i} className="flex gap-2 text-xs border-b border-border/30 last:border-0 pb-1.5">
+          {c.time > 0 && <span className="font-mono text-muted-foreground/60 shrink-0 w-7 text-right">{c.time}'</span>}
+          <p className="text-foreground/80 leading-relaxed">{c.text}</p>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+// ── Highlights section ────────────────────────────────────────────────────────
+
+function HighlightsSection({ gameId }: { gameId: string }) {
+  const { data, isLoading } = useQuery({
+    queryKey: ['highlights', gameId],
+    queryFn: () => fetchHighlights(gameId),
+    staleTime: 10 * 60_000,
+    enabled: true,
+  })
+
+  if (isLoading) return <div className="space-y-2"><Skeleton className="h-10" /><Skeleton className="h-10" /></div>
+
+  const highlights = data?.highlights ?? []
+  if (!highlights.length) return (
+    <div className="flex flex-col items-center justify-center py-8 text-center gap-2">
+      <p className="text-2xl opacity-20">▶</p>
+      <p className="text-sm text-muted-foreground">Sem destaques disponíveis</p>
+    </div>
+  )
+
+  return (
+    <div className="space-y-2">
+      {highlights.slice(0, 3).map((h, i) => (
+        <a key={i} href={h.url} target="_blank" rel="noopener noreferrer"
+          className="flex items-center gap-2 p-2 rounded-lg bg-white/5 hover:bg-white/10 transition-colors">
+          <span className="text-red-400 text-sm shrink-0">▶</span>
+          <span className="text-xs truncate flex-1">{h.title}</span>
+          {h.keyHighlight && <span className="text-xs text-yellow-400 shrink-0">★</span>}
+        </a>
+      ))}
+    </div>
+  )
+}
+
+// ── Votes widget ──────────────────────────────────────────────────────────────
+
+function VotesWidget({ gameId, homeTeam, awayTeam }: { gameId: string; homeTeam: string; awayTeam: string }) {
+  const { data } = useQuery({
+    queryKey: ['votes', gameId],
+    queryFn: () => fetchVotes(gameId),
+    staleTime: 5 * 60_000,
+  })
+  const v = (data as { vote?: { vote1?: number; voteX?: number; vote2?: number } } | null)?.vote
+  if (!v || (!v.vote1 && !v.vote2)) return null
+  const total = (v.vote1 ?? 0) + (v.voteX ?? 0) + (v.vote2 ?? 0)
+  if (!total) return null
+  const pct = (n: number) => Math.round((n / total) * 100)
+
+  return (
+    <div className="space-y-1.5">
+      <p className="text-xs text-muted-foreground uppercase tracking-widest">Votação dos torcedores</p>
+      <div className="flex gap-2 text-xs">
+        {[
+          { label: homeTeam, p: pct(v.vote1 ?? 0), color: '#38bdf8' },
+          { label: 'Empate', p: pct(v.voteX ?? 0), color: '#a1a1aa' },
+          { label: awayTeam, p: pct(v.vote2 ?? 0), color: '#fb923c' },
+        ].map(({ label, p, color }) => (
+          <div key={label} className="flex-1 text-center">
+            <div className="h-1 rounded-full mb-1" style={{ backgroundColor: color, opacity: 0.7 }} />
+            <span style={{ color }} className="font-mono font-bold">{p}%</span>
+            <p className="text-muted-foreground/60 truncate mt-0.5 text-xs">{label}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// ── Best players widget ───────────────────────────────────────────────────────
+
+function BestPlayersWidget({ gameId, homeTeam, awayTeam }: { gameId: string; homeTeam: string; awayTeam: string }) {
+  const { data } = useQuery({
+    queryKey: ['best-players', gameId],
+    queryFn: () => fetchBestPlayers(gameId),
+    staleTime: 5 * 60_000,
+  })
+  const home: BestPlayer[] = data?.home ?? []
+  const away: BestPlayer[] = data?.away ?? []
+  const motm = data?.motm
+
+  if (!home.length && !away.length) return null
+
+  return (
+    <div className="space-y-2">
+      {motm?.name && (
+        <div className="flex items-center gap-2 py-2 px-3 bg-yellow-400/10 rounded-lg border border-yellow-400/20">
+          <span className="text-yellow-400">★</span>
+          <div>
+            <p className="text-xs text-yellow-400/70 uppercase tracking-widest">Jogador da partida</p>
+            <p className="text-xs font-semibold">{motm.name} <span className="text-muted-foreground font-normal">{motm.rating}</span></p>
+          </div>
+        </div>
+      )}
+      <div className="grid grid-cols-2 gap-3">
+        {[
+          { team: homeTeam, players: home, color: 'text-sky-400' },
+          { team: awayTeam, players: away, color: 'text-orange-400' },
+        ].map(({ team, players, color }) => (
+          <div key={team}>
+            <p className={cn('text-xs uppercase tracking-widest mb-1', color)}>{team}</p>
+            {players.map((p, i) => (
+              <div key={i} className="flex items-center justify-between py-0.5">
+                <span className="text-xs truncate">{p.name}</span>
+                <span className="text-xs font-mono text-muted-foreground ml-1 shrink-0">{p.rating}</span>
+              </div>
+            ))}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// ── Managers widget ───────────────────────────────────────────────────────────
+
+function ManagersWidget({ gameId }: { gameId: string }) {
+  const { data } = useQuery({
+    queryKey: ['managers', gameId],
+    queryFn: () => fetchManagers(gameId),
+    staleTime: 60 * 60_000,
+  })
+  if (!data?.homeManager && !data?.awayManager) return null
+  return (
+    <div className="flex justify-between text-xs text-muted-foreground mt-1">
+      <span>Técnico: <span className="text-foreground/70">{data.homeManager?.name ?? '—'}</span></span>
+      <span>Técnico: <span className="text-foreground/70">{data.awayManager?.name ?? '—'}</span></span>
+    </div>
+  )
+}
+
+// ── Confidence meter ──────────────────────────────────────────────────────────
+
+function ConfidenceMeter({ value }: { value: number }) {
+  const pct = Math.round(value * 100)
+  const color = pct >= 80 ? '#34d399' : pct >= 65 ? '#fbbf24' : '#6b7280'
+  return (
+    <div className="space-y-1">
+      <div className="flex justify-between text-xs">
+        <span className="text-muted-foreground">Confiança</span>
+        <span className="font-mono tabular-nums" style={{ color }}>{pct}%</span>
+      </div>
+      <div className="h-1.5 bg-white/8 rounded-full overflow-hidden">
+        <div className="h-full rounded-full" style={{ width: `${pct}%`, backgroundColor: color }} />
+      </div>
+    </div>
+  )
+}
+
+// ── Main page ─────────────────────────────────────────────────────────────────
+
+export default function GamePage({ params }: { params: { id: string } }) {
+  const id = params.id
+  const router = useRouter()
+  const { data, isLoading, error } = useAnalysis(id)
+
+  if (isLoading) {
+    return (
+      <div className="p-5 max-w-5xl mx-auto space-y-3">
+        <Skeleton className="h-16 rounded-xl" />
+        <Skeleton className="h-24 rounded-xl" />
+        <Skeleton className="h-48 rounded-xl" />
+        <Skeleton className="h-48 rounded-xl" />
+      </div>
+    )
+  }
+
+  if (error || !data) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full gap-3 py-32">
+        <p className="text-muted-foreground text-sm">Jogo não encontrado</p>
+        <button onClick={() => router.push('/')} className="text-primary text-sm hover:underline">← Voltar</button>
+      </div>
+    )
+  }
+
+  const { game, signals, homeStats: h, awayStats: a, report, news = [] } = data
+  const topSignal = signals?.[0]
+  const homeGoals = h?.goalsScoredAvg ?? 1.2
+  const awayGoals = a?.goalsScoredAvg ?? 1.0
+  const isLive = game.status === 'inprogress' || game.status === 'halftime'
+  const isFinished = game.status === 'finished'
+
+  // Win probabilities derived from Poisson
+  const poissonWin = (() => {
+    let home = 0, draw = 0, away = 0
+    for (let hg = 0; hg < 6; hg++) {
+      for (let ag = 0; ag < 6; ag++) {
+        const p = Math.exp(-homeGoals) * Math.pow(homeGoals, hg) / factorial(hg)
+               * Math.exp(-awayGoals) * Math.pow(awayGoals, ag) / factorial(ag)
+        if (hg > ag) home += p
+        else if (hg === ag) draw += p
+        else away += p
+      }
+    }
+    return { home, draw, away }
+  })()
+
+  function factorial(n: number): number {
+    let r = 1; for (let i = 2; i <= n; i++) r *= i; return r
+  }
+
+  return (
+    <div className="flex flex-col">
+      {/* Sticky header */}
+      <div className="sticky top-0 z-10 bg-background/95 backdrop-blur border-b border-border px-4 py-3">
+        <div className="max-w-5xl mx-auto">
+          <div className="flex items-center gap-3 mb-1">
+            <button
+              onClick={() => router.back()}
+              className="text-muted-foreground hover:text-foreground transition-colors text-sm"
+            >
+              ← Voltar
+            </button>
+            {isLive && (
+              <span className="flex items-center gap-1.5 text-emerald-400 text-xs">
+                <span className="relative flex h-2 w-2">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
+                </span>
+                AO VIVO
+              </span>
+            )}
+          </div>
+          <div className="flex items-center justify-between gap-2">
+            <div className="min-w-0">
+              <p className="text-base font-semibold truncate">
+                {game.homeTeam} <span className="text-muted-foreground font-normal">vs</span> {game.awayTeam}
+              </p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                {game.league} · {game.country} · {kickoffBRT(game.kickoffAt)}
+              </p>
+            </div>
+            {topSignal && <MarketBadge market={topSignal.market} size="md" />}
+          </div>
+        </div>
+      </div>
+
+      {/* Two-column layout on desktop, single-column on mobile */}
+      <div className="max-w-5xl mx-auto w-full px-4 py-4">
+        <div className="flex gap-4 items-start">
+
+          {/* ── Left column: main content ───────────────────────────── */}
+          <div className="flex-1 min-w-0 space-y-2">
+
+            {/* Análise IA */}
+            <Section title="Análise IA" defaultOpen={true}>
+              {report ? (
+                <ul className="space-y-1.5">
+                  {report.split('\n').filter(Boolean).map((line, i) => (
+                    <li key={i} className="flex gap-2 text-sm text-foreground/70 leading-relaxed">
+                      <span className="text-violet-400/60 shrink-0 mt-0.5">·</span>
+                      <span>{line.replace(/^[-•·#]\s*/, '')}</span>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <div className="space-y-2">
+                  {[60, 85, 70, 90, 50].map((w, i) => (
+                    <Skeleton key={i} className="h-3 rounded" style={{ width: `${w}%` }} />
+                  ))}
+                  <p className="text-xs text-muted-foreground/50 pt-1">Aguardando análise...</p>
+                </div>
+              )}
+            </Section>
+
+            {/* Estatísticas */}
+            <Section title="Estatísticas" defaultOpen={true}>
+              <div className="flex justify-between text-xs font-semibold mb-3">
+                <span className="text-sky-400">{game.homeTeam}</span>
+                <span className="text-orange-400">{game.awayTeam}</span>
+              </div>
+              <StatRow label="xG marc." home={h?.xgAvg} away={a?.xgAvg} />
+              <StatRow label="xG sofr." home={h?.xgConcededAvg} away={a?.xgConcededAvg} higherIsBetter={false} />
+              <StatRow label="Gols marc." home={h?.goalsScoredAvg} away={a?.goalsScoredAvg} />
+              <StatRow label="Gols sofr." home={h?.goalsConcededAvg} away={a?.goalsConcededAvg} higherIsBetter={false} />
+              <StatRow label="BTTS %" home={h?.bttsPct} away={a?.bttsPct} format="pct" />
+              <StatRow label="Over 2.5 %" home={h?.over25Pct} away={a?.over25Pct} format="pct" />
+              {h?.possessionAvg != null && <StatRow label="Posse %" home={h.possessionAvg} away={a?.possessionAvg} format="pct" />}
+              {(h?.formLast5 || a?.formLast5) && (
+                <div className="mt-3 pt-3 border-t border-border/50">
+                  <p className="text-xs text-muted-foreground uppercase tracking-widest mb-2">Forma recente</p>
+                  <div className="flex items-center justify-between">
+                    <FormPills form={h?.formLast5} />
+                    <span className="text-xs text-muted-foreground">vs</span>
+                    <FormPills form={a?.formLast5} />
+                  </div>
+                </div>
+              )}
+              {(h || a) && (
+                <div className="mt-4">
+                  <XGChart
+                    homeTeam={game.homeTeam}
+                    awayTeam={game.awayTeam}
+                    homeXg={h?.xgAvg}
+                    awayXg={a?.xgAvg}
+                    homeGoals={h?.goalsScoredAvg}
+                    awayGoals={a?.goalsScoredAvg}
+                    homeXgConceded={h?.xgConcededAvg}
+                    awayXgConceded={a?.xgConcededAvg}
+                  />
+                </div>
+              )}
+              <VotesWidget gameId={game.id} homeTeam={game.homeTeam} awayTeam={game.awayTeam} />
+              <ManagersWidget gameId={game.id} />
+              {(isLive || isFinished) && (
+                <BestPlayersWidget gameId={game.id} homeTeam={game.homeTeam} awayTeam={game.awayTeam} />
+              )}
+            </Section>
+
+            {/* Probabilidades */}
+            <Section title="Probabilidades" defaultOpen={false}>
+              <p className="text-xs text-muted-foreground uppercase tracking-widest mb-3">Distribuição Poisson</p>
+              <PoissonHeatmap
+                homeGoals={homeGoals}
+                awayGoals={awayGoals}
+                homeTeam={game.homeTeam}
+                awayTeam={game.awayTeam}
+              />
+              <div className="grid grid-cols-3 gap-2 mt-4">
+                {[
+                  { label: game.homeTeam, value: poissonWin.home, color: 'text-sky-400' },
+                  { label: 'Empate', value: poissonWin.draw, color: 'text-muted-foreground' },
+                  { label: game.awayTeam, value: poissonWin.away, color: 'text-orange-400' },
+                ].map(({ label, value, color }) => (
+                  <div key={label} className="text-center py-3 bg-white/5 rounded-xl">
+                    <p className={cn('text-lg font-bold font-mono tabular-nums', color)}>
+                      {(value * 100).toFixed(0)}%
+                    </p>
+                    <p className="text-xs text-muted-foreground mt-0.5 truncate px-1">{label}</p>
+                  </div>
+                ))}
+              </div>
+            </Section>
+
+            {/* H2H */}
+            <Section title="H2H" defaultOpen={false}>
+              <H2HSection gameId={game.id} homeTeam={game.homeTeam} awayTeam={game.awayTeam} />
+            </Section>
+
+            {/* Ao Vivo */}
+            {isLive && (
+              <Section title="Visão Geral" defaultOpen={true}>
+                <MatchOverview
+                  gameId={game.id}
+                  homeTeam={game.homeTeam}
+                  awayTeam={game.awayTeam}
+                  homeTeamId={game.homeTeamId}
+                  awayTeamId={game.awayTeamId}
+                />
+              </Section>
+            )}
+
+            {/* Narração */}
+            {(isLive || isFinished) && (
+              <Section title="Narração" defaultOpen={false}>
+                <CommentarySection gameId={game.id} />
+              </Section>
+            )}
+
+            {/* Destaques */}
+            {(isLive || isFinished) && (
+              <Section title="Destaques" defaultOpen={false}>
+                <HighlightsSection gameId={game.id} />
+              </Section>
+            )}
+
+          </div>
+
+          {/* ── Right sidebar: signals + odds + squad ───────────────── */}
+          <div className="w-80 shrink-0 space-y-2 hidden lg:block">
+
+            {/* Sinais */}
+            <Section title="Sinais" defaultOpen={true}>
+              {!signals || signals.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-6 text-center gap-2">
+                  <p className="text-2xl opacity-20">◈</p>
+                  <p className="text-sm text-muted-foreground">Nenhum sinal gerado</p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {signals.map(s => (
+                    <div key={s.id} className="space-y-2 pb-3 border-b border-border/40 last:border-0 last:pb-0">
+                      <div className="flex items-center justify-between">
+                        <MarketBadge market={s.market} size="md" />
+                        <span className="text-xl font-bold font-mono tabular-nums">{Math.round(s.probability * 100)}%</span>
+                      </div>
+                      <ConfidenceMeter value={s.confidence} />
+                      {s.ev != null && (
+                        <p className="text-xs font-mono">
+                          EV: <span className={s.ev >= 0 ? 'text-emerald-400' : 'text-red-400'}>
+                            {s.ev >= 0 ? '+' : ''}{s.ev.toFixed(1)}%
+                          </span>
+                        </p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </Section>
+
+            {/* Odds */}
+            <Section title="Odds" defaultOpen={true}>
+              <OddsSection gameId={game.id} />
+            </Section>
+
+            {/* Elenco */}
+            <Section title="Elenco" defaultOpen={false}>
+              <SquadSection gameId={game.id} homeTeam={game.homeTeam} awayTeam={game.awayTeam} />
+            </Section>
+
+            {/* Notícias */}
+            {news.length > 0 && (
+              <Section title={`Notícias (${news.length})`} defaultOpen={true}>
+                <ul className="space-y-3">
+                  {news.map((item, i) => (
+                    <li key={i} className="flex gap-2.5 items-start">
+                      <div className="shrink-0 w-1 h-1 rounded-full bg-violet-400/50 mt-2" />
+                      <div className="min-w-0">
+                        {item.url ? (
+                          <a href={item.url} target="_blank" rel="noopener noreferrer"
+                            className="text-sm text-foreground/80 hover:text-foreground leading-snug line-clamp-2 transition-colors">
+                            {item.title}
+                          </a>
+                        ) : (
+                          <p className="text-sm text-foreground/80 leading-snug line-clamp-2">{item.title}</p>
+                        )}
+                        <div className="flex items-center gap-2 mt-0.5">
+                          <span className="text-xs text-muted-foreground/60">{item.source}</span>
+                          {item.publishedAt && (
+                            <>
+                              <span className="text-muted-foreground/30">·</span>
+                              <span className="text-xs text-muted-foreground/40">
+                                {new Date(item.publishedAt).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}
+                              </span>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              </Section>
+            )}
+
+          </div>
+
+          {/* ── Mobile-only sections (visible below lg) ─────────────── */}
+          <div className="lg:hidden w-full space-y-2" style={{ display: 'contents' }}>
+          </div>
+
+        </div>
+
+        {/* Mobile-only: Sinais + Odds + Elenco below main content */}
+        <div className="lg:hidden space-y-2 mt-2">
+          <Section title="Sinais" defaultOpen={true}>
+            {!signals || signals.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-6 text-center gap-2">
+                <p className="text-2xl opacity-20">◈</p>
+                <p className="text-sm text-muted-foreground">Nenhum sinal gerado</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {signals.map(s => (
+                  <div key={s.id} className="space-y-2 pb-3 border-b border-border/40 last:border-0 last:pb-0">
+                    <div className="flex items-center justify-between">
+                      <MarketBadge market={s.market} size="md" />
+                      <span className="text-xl font-bold font-mono tabular-nums">{Math.round(s.probability * 100)}%</span>
+                    </div>
+                    <ConfidenceMeter value={s.confidence} />
+                    {s.ev != null && (
+                      <p className="text-xs font-mono">
+                        EV: <span className={s.ev >= 0 ? 'text-emerald-400' : 'text-red-400'}>
+                          {s.ev >= 0 ? '+' : ''}{s.ev.toFixed(1)}%
+                        </span>
+                      </p>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </Section>
+          <Section title="Odds" defaultOpen={false}>
+            <OddsSection gameId={game.id} />
+          </Section>
+          <Section title="Elenco" defaultOpen={false}>
+            <SquadSection gameId={game.id} homeTeam={game.homeTeam} awayTeam={game.awayTeam} />
+          </Section>
+          {news.length > 0 && (
+            <Section title={`Notícias (${news.length})`} defaultOpen={true}>
+              <ul className="space-y-3">
+                {news.map((item, i) => (
+                  <li key={i} className="flex gap-2.5 items-start">
+                    <div className="shrink-0 w-1 h-1 rounded-full bg-violet-400/50 mt-2" />
+                    <div className="min-w-0">
+                      {item.url ? (
+                        <a href={item.url} target="_blank" rel="noopener noreferrer"
+                          className="text-sm text-foreground/80 hover:text-foreground leading-snug line-clamp-2 transition-colors">
+                          {item.title}
+                        </a>
+                      ) : (
+                        <p className="text-sm text-foreground/80 leading-snug line-clamp-2">{item.title}</p>
+                      )}
+                      <div className="flex items-center gap-2 mt-0.5">
+                        <span className="text-xs text-muted-foreground/60">{item.source}</span>
+                        {item.publishedAt && (
+                          <>
+                            <span className="text-muted-foreground/30">·</span>
+                            <span className="text-xs text-muted-foreground/40">
+                              {new Date(item.publishedAt).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}
+                            </span>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </Section>
+          )}
+        </div>
+
+      </div>
+    </div>
+  )
+}

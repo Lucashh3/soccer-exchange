@@ -1,0 +1,44 @@
+{
+  "name": "soccer-exchange",
+  "version": "1.0.0",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "dev": "nodemon --watch src --ext ts,json --exec ts-node src/index.ts",
+    "dev:run-now": "ts-node src/index.ts --run-now",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "pipeline": "ts-node -e \"require('dotenv').config(); require('./src/scheduler/pipeline').runMorningPipeline().then(() => process.exit(0))\"",
+    "frontend": "cd frontend-next && npm run dev -- --port 3002",
+    "frontend:build": "cd frontend-next && npm run build"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "devDependencies": {
+    "@types/axios": "^0.9.36",
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/cheerio": "^0.22.35",
+    "@types/express": "^5.0.6",
+    "@types/node": "^25.5.0",
+    "@types/node-cron": "^3.0.11",
+    "nodemon": "^3.1.14",
+    "ts-node": "^10.9.2",
+    "typescript": "^6.0.2"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.82.0",
+    "@mendable/firecrawl-js": "^1.21.1",
+    "@tensorflow/tfjs-node": "^4.22.0",
+    "axios": "^1.14.0",
+    "better-sqlite3": "^12.8.0",
+    "cheerio": "^1.2.0",
+    "dotenv": "^17.4.0",
+    "express": "^5.2.1",
+    "node-cron": "^4.2.1",
+    "openai": "^6.33.0"
+  }
+}
