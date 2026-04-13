@@ -1,0 +1,7 @@
+.next/
+out/
+node_modules/
+.env
+.env.local
+.env.production
+next-env.d.ts
