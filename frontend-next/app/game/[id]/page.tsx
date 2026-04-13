@@ -1,7 +1,7 @@
 'use client'
 
 import { useRouter } from 'next/navigation'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useAnalysis } from '@/hooks/useGame'
 import { MarketBadge } from '@/components/signals/MarketBadge'
@@ -28,6 +28,139 @@ function kickoffBRT(iso: string) {
     day: '2-digit', month: '2-digit',
     hour: '2-digit', minute: '2-digit',
   })
+}
+
+// ── Analysis report (JSON format) ────────────────────────────────────────────
+
+interface AnalysisReport {
+  signal: {
+    status: 'ENTRADA_VALIDADA' | 'ALERTA_DE_RISCO' | 'NO_BET'
+    market: string
+    direction: 'BACK_HOME' | 'BACK_AWAY' | 'LAY_HOME' | 'LAY_AWAY' | 'NONE'
+    probability: number
+    confidence: number
+  }
+  evidences: string[]
+  counterEvidences: string[]
+  invalidationConditions: string[]
+  decision: {
+    stake: '1.0u' | '0.5u' | '0.0u'
+    noBetReason: string | null
+  }
+}
+
+function parseReport(raw: string): AnalysisReport | null {
+  try {
+    const start = raw.indexOf('{')
+    const end = raw.lastIndexOf('}')
+    if (start < 0 || end <= start) return null
+    const parsed = JSON.parse(raw.slice(start, end + 1))
+    if (parsed?.signal?.status) return parsed as AnalysisReport
+  } catch {}
+  return null
+}
+
+const STATUS_STYLES: Record<string, string> = {
+  ENTRADA_VALIDADA: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300',
+  ALERTA_DE_RISCO: 'border-amber-500/40 bg-amber-500/10 text-amber-300',
+  NO_BET: 'border-white/10 bg-white/5 text-muted-foreground',
+}
+const STATUS_LABELS: Record<string, string> = {
+  ENTRADA_VALIDADA: 'Entrada Validada',
+  ALERTA_DE_RISCO: 'Alerta de Risco',
+  NO_BET: 'No Bet',
+}
+const DIRECTION_LABELS: Record<string, string> = {
+  BACK_HOME: 'Back Casa',
+  BACK_AWAY: 'Back Visitante',
+  LAY_HOME: 'Lay Casa',
+  LAY_AWAY: 'Lay Visitante',
+  NONE: '—',
+}
+
+function AnalysisReportView({ report }: { report: AnalysisReport }) {
+  const { signal, evidences, counterEvidences, invalidationConditions, decision } = report
+  const statusStyle = STATUS_STYLES[signal.status] ?? STATUS_STYLES['NO_BET']
+
+  return (
+    <div className="space-y-4">
+      {/* Signal header */}
+      <div className={cn('rounded-lg border px-3 py-2.5 flex flex-wrap items-center justify-between gap-2', statusStyle)}>
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-xs font-semibold uppercase tracking-wide">
+            {STATUS_LABELS[signal.status] ?? signal.status}
+          </span>
+          {signal.direction !== 'NONE' && (
+            <span className="text-xs px-1.5 py-0.5 rounded bg-white/10">
+              {DIRECTION_LABELS[signal.direction] ?? signal.direction}
+            </span>
+          )}
+          {signal.market && signal.market !== '—' && (
+            <span className="text-xs opacity-70">{signal.market}</span>
+          )}
+        </div>
+        <div className="flex items-center gap-3 text-xs opacity-80">
+          <span>Prob. {Number(signal.probability).toFixed(1)}%</span>
+          <span>Conf. {signal.confidence}</span>
+          <span className={cn('font-semibold', decision.stake === '0.0u' ? 'opacity-40' : '')}>
+            {decision.stake}
+          </span>
+        </div>
+      </div>
+
+      {/* Evidences */}
+      {evidences.length > 0 && (
+        <div>
+          <p className="text-xs text-muted-foreground uppercase tracking-widest mb-2">Evidências</p>
+          <ul className="space-y-1.5">
+            {evidences.map((e, i) => (
+              <li key={i} className="flex gap-2 text-sm text-foreground/80 leading-snug">
+                <span className="text-emerald-400/80 shrink-0 mt-0.5 font-bold">+</span>
+                <span>{e}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {/* Counter evidences */}
+      {counterEvidences.length > 0 && (
+        <div>
+          <p className="text-xs text-muted-foreground uppercase tracking-widest mb-2">Contraevidências</p>
+          <ul className="space-y-1.5">
+            {counterEvidences.map((e, i) => (
+              <li key={i} className="flex gap-2 text-sm text-foreground/60 leading-snug">
+                <span className="text-amber-400/80 shrink-0 mt-0.5 font-bold">−</span>
+                <span>{e}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {/* Invalidation conditions */}
+      {invalidationConditions.length > 0 && (
+        <div>
+          <p className="text-xs text-muted-foreground uppercase tracking-widest mb-2">Condições de Invalidação</p>
+          <ul className="space-y-1.5">
+            {invalidationConditions.map((c, i) => (
+              <li key={i} className="flex gap-2 text-sm text-foreground/60 leading-snug">
+                <span className="text-rose-400/80 shrink-0 mt-0.5">!</span>
+                <span>{c}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {/* No-bet reason */}
+      {decision.noBetReason && (
+        <p className="text-xs text-muted-foreground border border-white/10 rounded-lg px-3 py-2 leading-relaxed">
+          {decision.noBetReason}
+        </p>
+      )}
+    </div>
+  )
 }
 
 // ── Collapsible Section ───────────────────────────────────────────────────────
@@ -58,6 +191,12 @@ function Section({
 
 // ── Live Stats section ────────────────────────────────────────────────────────
 
+interface AttackSnapshot {
+  minute: number
+  attacks: { h: number; a: number }
+  dangerous: { h: number; a: number }
+}
+
 interface LiveData {
   status: string
   minute?: string
@@ -77,6 +216,7 @@ function LiveSection({ gameId, homeTeam, awayTeam }: { gameId: string; homeTeam:
   const [liveData, setLiveData] = useState<LiveData | null>(null)
   const [liveStats, setLiveStats] = useState<LiveStats | null>(null)
   const [loading, setLoading] = useState(true)
+  const attackHistoryRef = useRef<AttackSnapshot[]>([])
 
   const { data: graphData } = useQuery({
     queryKey: ['graph', gameId],
@@ -99,8 +239,27 @@ function LiveSection({ gameId, homeTeam, awayTeam }: { gameId: string; homeTeam:
           fetch(`/api/game/${gameId}/live`, { cache: 'no-store' }),
           fetch(`/api/game/${gameId}/live-stats`, { cache: 'no-store' }),
         ])
-        setLiveData(await liveRes.json())
-        setLiveStats(await statsRes.json())
+        const [liveJson, statsJson] = await Promise.all([liveRes.json(), statsRes.json()])
+        const currentMinute = (liveJson?.clock?.minute ?? parseInt(String(liveJson?.minute ?? '0'))) || 0
+        if (currentMinute > 0 && statsJson?.stats?.length) {
+          const norm = (n: string) => n.toLowerCase().trim()
+          const toNum = (v: string | number | null) => parseFloat(String(v ?? '0')) || 0
+          const findStat = (pred: (n: string) => boolean) => {
+            const s = statsJson.stats.find((s: { name: string }) => pred(norm(s.name)))
+            return s ? { h: toNum(s.home), a: toNum(s.away) } : null
+          }
+          const attacks = findStat(n => n.includes('attack') && !n.includes('dangerous'))
+          const dangerous = findStat(n => n.includes('dangerous'))
+          if (attacks && dangerous) {
+            const hist = attackHistoryRef.current
+            if (!hist.length || hist[hist.length - 1].minute !== currentMinute) {
+              hist.push({ minute: currentMinute, attacks, dangerous })
+              if (hist.length > 20) hist.shift()
+            }
+          }
+        }
+        setLiveData(liveJson)
+        setLiveStats(statsJson)
       } catch { /* ignore */ } finally { setLoading(false) }
     }
     fetchLiveData()
@@ -161,8 +320,31 @@ function LiveSection({ gameId, homeTeam, awayTeam }: { gameId: string; homeTeam:
         </>
       )}
       <CoachCard gameId={gameId} isLive={coachLive} />
-      {liveAvailable && (
-        liveStats?.stats && liveStats.stats.length > 0 ? (
+      {liveAvailable && (() => {
+        if (!liveStats?.stats?.length) {
+          return <p className="text-center text-muted-foreground text-sm py-2">Estatísticas não disponíveis</p>
+        }
+        const norm = (n: string) => n.toLowerCase().replace(/\s+/g, ' ').trim()
+        const toNum = (v: string | number | null) => parseFloat(String(v ?? '0')) || 0
+        const byName = new Map(liveStats.stats.map(s => [norm(s.name), s] as const))
+        const find = (...keys: string[]) => keys.map(k => byName.get(norm(k))).find(Boolean) ?? null
+
+        const currentMinute = (liveData?.clock?.minute ?? parseInt(String(liveData?.minute ?? '0'))) || 0
+        const hist = attackHistoryRef.current
+        const findSnap = (target: number) => {
+          let best: AttackSnapshot | null = null, bestD = Infinity
+          for (const s of hist) { const d = Math.abs(s.minute - target); if (d < bestD) { bestD = d; best = s } }
+          return bestD <= 3 ? best : null
+        }
+        const rv = (curr: number, prev: number, dt: number) => dt > 0 ? (curr - prev) / dt : 0
+        const snap5 = hist.length ? findSnap(currentMinute - 5) : null
+        const snap10 = hist.length ? findSnap(currentMinute - 10) : null
+        const fmt = (v: number) => v.toFixed(1)
+
+        const atkStat = find('attacks')
+        const dngStat = find('dangerous attacks')
+
+        return (
           <div className="space-y-2">
             {liveStats.stats.map((stat, i) => (
               <div key={i} className="flex items-center text-sm">
@@ -171,11 +353,50 @@ function LiveSection({ gameId, homeTeam, awayTeam }: { gameId: string; homeTeam:
                 <span className="w-24 text-right pl-2 font-mono">{stat.away}</span>
               </div>
             ))}
+            {(atkStat || dngStat) && (
+              <div className="space-y-2 border-t border-border/40 pt-2">
+                {([
+                  { label: 'Ataques', stat: atkStat, snapKey: 'attacks' as const },
+                  { label: 'At. Perigosos', stat: dngStat, snapKey: 'dangerous' as const },
+                ]).filter(r => r.stat).map(({ label, stat, snapKey }) => {
+                  const h = toNum(stat!.home), a = toNum(stat!.away)
+                  const s5 = snap5?.[snapKey], s10 = snap10?.[snapKey]
+                  return (
+                    <div key={label} className="space-y-0.5">
+                      <div className="flex items-center text-sm">
+                        <span className="w-24 font-mono tabular-nums text-right pr-2 text-sky-400">{h}</span>
+                        <span className="flex-1 text-center text-xs font-medium text-muted-foreground">{label}</span>
+                        <span className="w-24 text-right pl-2 font-mono tabular-nums text-orange-400">{a}</span>
+                      </div>
+                      {currentMinute > 0 && (
+                        <div className="flex items-center">
+                          <span className="w-24 font-mono tabular-nums text-right pr-2 text-xs text-sky-400/60">{fmt(h / currentMinute)}</span>
+                          <span className="flex-1 text-center text-[11px] text-muted-foreground/50">por min</span>
+                          <span className="w-24 text-right pl-2 font-mono tabular-nums text-xs text-orange-400/60">{fmt(a / currentMinute)}</span>
+                        </div>
+                      )}
+                      {s5 && snap5 && (
+                        <div className="flex items-center">
+                          <span className="w-24 font-mono tabular-nums text-right pr-2 text-xs text-sky-400/60">{fmt(rv(h, s5.h, currentMinute - snap5.minute))}</span>
+                          <span className="flex-1 text-center text-[11px] text-muted-foreground/50">últ. 5&apos;</span>
+                          <span className="w-24 text-right pl-2 font-mono tabular-nums text-xs text-orange-400/60">{fmt(rv(a, s5.a, currentMinute - snap5.minute))}</span>
+                        </div>
+                      )}
+                      {s10 && snap10 && (
+                        <div className="flex items-center">
+                          <span className="w-24 font-mono tabular-nums text-right pr-2 text-xs text-sky-400/60">{fmt(rv(h, s10.h, currentMinute - snap10.minute))}</span>
+                          <span className="flex-1 text-center text-[11px] text-muted-foreground/50">últ. 10&apos;</span>
+                          <span className="w-24 text-right pl-2 font-mono tabular-nums text-xs text-orange-400/60">{fmt(rv(a, s10.a, currentMinute - snap10.minute))}</span>
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            )}
           </div>
-        ) : (
-          <p className="text-center text-muted-foreground text-sm py-2">Estatísticas não disponíveis</p>
         )
-      )}
+      })()}
     </div>
   )
 }
@@ -644,14 +865,22 @@ export default function GamePage({ params }: { params: { id: string } }) {
             {/* Análise IA */}
             <Section title="Análise IA" defaultOpen={true}>
               {report ? (
-                <ul className="space-y-1.5">
-                  {report.split('\n').filter(Boolean).map((line, i) => (
-                    <li key={i} className="flex gap-2 text-sm text-foreground/70 leading-relaxed">
-                      <span className="text-violet-400/60 shrink-0 mt-0.5">·</span>
-                      <span>{line.replace(/^[-•·#]\s*/, '')}</span>
-                    </li>
-                  ))}
-                </ul>
+                (() => {
+                  const parsed = parseReport(report)
+                  return parsed ? (
+                    <AnalysisReportView report={parsed} />
+                  ) : (
+                    // Fallback para relatórios antigos em texto livre
+                    <ul className="space-y-1.5">
+                      {report.split('\n').filter(Boolean).map((line, i) => (
+                        <li key={i} className="flex gap-2 text-sm text-foreground/70 leading-relaxed">
+                          <span className="text-violet-400/60 shrink-0 mt-0.5">·</span>
+                          <span>{line.replace(/^[-•·#]\s*/, '')}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  )
+                })()
               ) : (
                 <div className="space-y-2">
                   {[60, 85, 70, 90, 50].map((w, i) => (

@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Card } from '@/components/ui/card'
 import { MarketBadge, marketColor, MARKET_CONFIG } from './MarketBadge'
@@ -140,6 +140,7 @@ export function SignalCard({ game, className, isFavorite = false, onToggleFavori
   const [liveStats, setLiveStats] = useState<{ name: string; home: string | number | null; away: string | number | null }[]>([])
   const [latestComment, setLatestComment] = useState<{ text: string; minute?: number } | null>(null)
   const [ppmSignal, setPpmSignal] = useState<EntrySignal | null>(null)
+  const attackHistoryRef = useRef<{ minute: number; attacks: { h: number; a: number }; dangerous: { h: number; a: number } }[]>([])
   const signal = game.topSignal
   const isLive = game.status === 'inprogress' || game.status === 'halftime'
   const hasScore = (game.status === 'inprogress' || game.status === 'halftime' || game.status === 'finished')
@@ -223,6 +224,26 @@ export function SignalCard({ game, className, isFavorite = false, onToggleFavori
     const interval = setInterval(() => { fetchLive(); fetchMomentum(); fetchStats(); fetchCommentary(); fetchPpm() }, 30000)
     return () => clearInterval(interval)
   }, [game.id, game.status])
+
+  useEffect(() => {
+    const currentMinute = (liveData?.clock?.minute ?? parseInt(String(liveData?.minute ?? '0'))) || 0
+    if (!currentMinute || !liveStats.length) return
+    const norm = (n: string) => n.toLowerCase().trim()
+    const toNum = (v: string | number | null) => parseFloat(String(v ?? '0')) || 0
+    const findStat = (pred: (n: string) => boolean) => {
+      const s = liveStats.find(s => pred(norm(s.name)))
+      return s ? { h: toNum(s.home), a: toNum(s.away) } : null
+    }
+    const attacks = findStat(n => n.includes('attack') && !n.includes('dangerous'))
+    const dangerous = findStat(n => n.includes('dangerous'))
+    if (attacks && dangerous) {
+      const hist = attackHistoryRef.current
+      if (!hist.length || hist[hist.length - 1].minute !== currentMinute) {
+        hist.push({ minute: currentMinute, attacks, dangerous })
+        if (hist.length > 20) hist.shift()
+      }
+    }
+  }, [liveData, liveStats])
 
   const noSignal = !signal
 
@@ -358,47 +379,63 @@ export function SignalCard({ game, className, isFavorite = false, onToggleFavori
 
       {/* Live stats strip */}
       {isLive && liveStats.length > 0 && (() => {
-        const normalizeStatName = (name: string) => name.toLowerCase().replace(/\s+/g, ' ').trim()
-        const statDefs: { label: string; keys: string[] }[] = [
-          { label: 'xG', keys: ['expected goals', 'expected goals (xg)', 'xg'] },
-          { label: 'Posse', keys: ['ball possession'] },
-          { label: 'Chutes a gol', keys: ['shots on target'] },
-          { label: 'Chutes', keys: ['total shots'] },
-          { label: 'Escanteios', keys: ['corner kicks'] },
-          { label: 'Grandes chances', keys: ['big chances'] },
-        ]
+        const norm = (n: string) => n.toLowerCase().replace(/\s+/g, ' ').trim()
+        const toNum = (v: string | number | null) => parseFloat(String(v ?? '0').replace('%', '')) || 0
+        const byName = new Map(liveStats.map(s => [norm(s.name), s] as const))
+        const find = (...keys: string[]) => keys.map(k => byName.get(norm(k))).find(Boolean) ?? null
 
-        const statsByName = new Map(
-          liveStats.map((stat) => [normalizeStatName(stat.name), stat] as const)
-        )
+        const currentMinute = (liveData?.clock?.minute ?? parseInt(String(liveData?.minute ?? '0'))) || 0
 
-        const shown = statDefs
-          .map((def) => {
-            const stat = def.keys
-              .map((key) => statsByName.get(normalizeStatName(key)))
-              .find(Boolean)
-            return stat ? { label: def.label, stat } : null
-          })
-          .filter(Boolean)
-          .slice(0, 4) as { label: string; stat: { name: string; home: string | number | null; away: string | number | null } }[]
+        type StatEntry = { label: string; h: number; a: number; isRate?: boolean }
+        const rows: StatEntry[] = []
 
-        if (!shown.length) return null
+        const add = (label: string, ...keys: string[]) => {
+          const s = find(...keys)
+          if (s) rows.push({ label, h: toNum(s.home), a: toNum(s.away) })
+          return s
+        }
+
+        add('xG', 'expected goals', 'expected goals (xg)', 'xg')
+        add('Posse', 'ball possession')
+        add('Chutes a gol', 'shots on target')
+        add('Chutes', 'total shots')
+
+        const atkStat = find('attacks')
+        const dngStat = find('dangerous attacks')
+
+        if (atkStat) {
+          const h = toNum(atkStat.home), a = toNum(atkStat.away)
+          rows.push({ label: 'Ataques', h, a })
+          if (currentMinute > 0) rows.push({ label: '/min', h: h / currentMinute, a: a / currentMinute, isRate: true })
+        }
+        if (dngStat) {
+          const h = toNum(dngStat.home), a = toNum(dngStat.away)
+          rows.push({ label: 'At. Per.', h, a })
+          if (currentMinute > 0) rows.push({ label: '/min', h: h / currentMinute, a: a / currentMinute, isRate: true })
+        }
+
+        if (!rows.length) return null
         return (
           <div className="px-3 pb-2 space-y-1">
-            {shown.map(({ label, stat }, i) => {
-              const parseV = (v: string | number | null) => parseFloat(String(v ?? '0').replace('%', '')) || 0
-              const h = parseV(stat.home), a = parseV(stat.away), total = h + a || 1
+            {rows.map(({ label, h, a, isRate }, i) => {
+              const total = h + a || 1
               return (
-                <div key={i} className="space-y-0.5">
-                  <div className="flex items-center justify-between" style={{ fontSize: '10px' }}>
-                    <span className="font-mono tabular-nums text-sky-400 w-8">{stat.home ?? '—'}</span>
-                    <span className="text-muted-foreground/60">{label}</span>
-                    <span className="font-mono tabular-nums text-orange-400 w-8 text-right">{stat.away ?? '—'}</span>
+                <div key={i} className={isRate ? undefined : 'space-y-0.5'}>
+                  <div className="flex items-center justify-between" style={{ fontSize: isRate ? '9px' : '10px' }}>
+                    <span className={`font-mono tabular-nums w-8 ${isRate ? 'text-sky-400/50' : 'text-sky-400'}`}>
+                      {isRate ? h.toFixed(1) : h || '—'}
+                    </span>
+                    <span className={isRate ? 'text-muted-foreground/40' : 'text-muted-foreground/60'}>{label}</span>
+                    <span className={`font-mono tabular-nums w-8 text-right ${isRate ? 'text-orange-400/50' : 'text-orange-400'}`}>
+                      {isRate ? a.toFixed(1) : a || '—'}
+                    </span>
                   </div>
-                  <div className="flex h-0.5 rounded-full overflow-hidden bg-white/5">
-                    <div className="h-full bg-sky-400/50" style={{ width: `${(h / total) * 100}%` }} />
-                    <div className="h-full bg-orange-400/50" style={{ width: `${(a / total) * 100}%` }} />
-                  </div>
+                  {!isRate && (
+                    <div className="flex h-0.5 rounded-full overflow-hidden bg-white/5">
+                      <div className="h-full bg-sky-400/50" style={{ width: `${(h / total) * 100}%` }} />
+                      <div className="h-full bg-orange-400/50" style={{ width: `${(a / total) * 100}%` }} />
+                    </div>
+                  )}
                 </div>
               )
             })}

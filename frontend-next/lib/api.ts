@@ -100,6 +100,14 @@ export const fetchPpm = (id: string) => get<PpmResponse>(`/game/${id}/ppm`)
 
 export type CoachAction = 'entrar_back' | 'entrar_lay' | 'aguardar' | 'sair'
 
+export interface CoachExposureGuidance {
+  minMinutes: number
+  maxMinutes: number
+  reviewAtMinute: number
+  urgency: 'baixa' | 'media' | 'alta'
+  exitTriggers: string[]
+}
+
 export interface CoachResponse {
   status: 'disabled' | 'inactive' | 'ready'
   text: string
@@ -115,7 +123,22 @@ export interface CoachResponse {
     ppm: boolean
     news: boolean
   }
+  exposure: CoachExposureGuidance | null
 }
 
 export const fetchCoach = (id: string, enabled: boolean) =>
   get<CoachResponse>(`/game/${id}/coach`, { enabled })
+
+export interface CoachSuggestionItem {
+  gameId: string
+  rationale: string
+}
+
+export interface CoachSuggestionsResponse {
+  suggestions: CoachSuggestionItem[]
+  generatedAt: number
+  fromCache: boolean
+}
+
+export const fetchCoachSuggestions = () =>
+  get<CoachSuggestionsResponse>('/coach/suggestions')

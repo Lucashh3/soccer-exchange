@@ -8,6 +8,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import type { Game, MarketType } from '@/types'
 import { cn } from '@/lib/utils'
 import { useFavorites } from '@/hooks/useFavorites'
+import { useCoachSuggestions } from '@/hooks/useCoachSuggestions'
 
 type FilterTab = 'all' | MarketType
 type SortKey = 'time' | 'confidence' | 'probability'
@@ -15,6 +16,7 @@ type StatusFilter =
   | 'all' | 'live' | 'finished' | 'scheduled'
   | 'first_half' | 'second_half' | 'draw'
   | 'strong_superiority' | 'strong_pressure'
+  | 'coach_suggestions'
 
 const MARKET_TABS: { id: FilterTab; label: string }[] = [
   { id: 'all',      label: 'Todos'       },
@@ -36,6 +38,7 @@ const STATUS_TABS: { id: StatusFilter; label: string }[] = [
   { id: 'draw',               label: 'Empates'             },
   { id: 'strong_superiority', label: 'Forte Superioridade' },
   { id: 'strong_pressure',    label: 'Forte Pressão'       },
+  { id: 'coach_suggestions',  label: 'Sugestão do Coach'   },
 ]
 
 function isGameLive(g: Game)      { return g.status === 'inprogress' || g.status === 'live' || g.status === 'halftime' || g.status === 'pause' }
@@ -167,6 +170,89 @@ function StatusSection({
   )
 }
 
+function CoachSuggestionsView({
+  suggestions,
+  allGames,
+  isLoading,
+  generatedAt,
+  fromCache,
+  isFavorite,
+  onToggleFavorite,
+}: {
+  suggestions: { gameId: string; rationale: string }[]
+  allGames: Game[]
+  isLoading: boolean
+  generatedAt: number
+  fromCache: boolean
+  isFavorite: (id: string) => boolean
+  onToggleFavorite: (id: string) => void
+}) {
+  const gameMap = useMemo(() => new Map(allGames.map((g) => [g.id, g])), [allGames])
+
+  const suggestedGames = useMemo(
+    () => suggestions.flatMap((s) => {
+      const game = gameMap.get(s.gameId)
+      return game ? [{ game, rationale: s.rationale }] : []
+    }),
+    [suggestions, gameMap],
+  )
+
+  if (isLoading) {
+    return (
+      <div className="space-y-3">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <Skeleton key={i} className="h-[130px] rounded-xl" />
+          ))}
+        </div>
+        <p className="text-xs text-muted-foreground text-center pt-2">O Coach está analisando os jogos do dia...</p>
+      </div>
+    )
+  }
+
+  if (suggestedGames.length === 0) {
+    return (
+      <p className="text-sm text-muted-foreground py-12 text-center">
+        Nenhuma sugestão disponível no momento. Tente novamente mais tarde.
+      </p>
+    )
+  }
+
+  const updatedAt = generatedAt > 0
+    ? new Date(generatedAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+    : null
+
+  return (
+    <div className="space-y-4">
+      {updatedAt && (
+        <p className="text-xs text-muted-foreground font-mono">
+          {suggestedGames.length} jogos selecionados pelo Coach
+          {' · '}atualizado às {updatedAt}
+          {fromCache && ' · cache'}
+        </p>
+      )}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+        {suggestedGames.map(({ game, rationale }) => (
+          <motion.div
+            key={game.id}
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.2 }}
+            className="flex flex-col gap-1.5"
+          >
+            <SignalCard
+              game={game}
+              isFavorite={isFavorite(game.id)}
+              onToggleFavorite={onToggleFavorite}
+            />
+            <p className="text-xs text-muted-foreground px-1 leading-relaxed">{rationale}</p>
+          </motion.div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 export default function Dashboard() {
   const { data: games, isLoading } = useGamesToday()
   const [tab, setTab]               = useState<FilterTab>('all')
@@ -176,6 +262,9 @@ export default function Dashboard() {
 
   const { favorites, toggle: toggleFavorite, isFavorite } = useFavorites()
   const [showFavOnly, setShowFavOnly] = useState(false)
+
+  const isCoachTab = status === 'coach_suggestions'
+  const { data: suggestionsData, isLoading: isSuggestionsLoading } = useCoachSuggestions(isCoachTab)
 
   const allGames = games ?? []
 
@@ -385,7 +474,17 @@ export default function Dashboard() {
       </div>
 
       {/* Results */}
-      {sorted.length === 0 && !isLoading ? (
+      {isCoachTab ? (
+        <CoachSuggestionsView
+          suggestions={suggestionsData?.suggestions ?? []}
+          allGames={allGames}
+          isLoading={isSuggestionsLoading || isLoading}
+          generatedAt={suggestionsData?.generatedAt ?? 0}
+          fromCache={suggestionsData?.fromCache ?? false}
+          isFavorite={isFavorite}
+          onToggleFavorite={toggleFavorite}
+        />
+      ) : sorted.length === 0 && !isLoading ? (
         <p className="text-sm text-muted-foreground py-12 text-center">Nenhum jogo encontrado</p>
       ) : (
         <AnimatePresence mode="wait">

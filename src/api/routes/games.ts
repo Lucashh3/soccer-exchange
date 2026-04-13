@@ -2,6 +2,7 @@ import { Router, Request, Response, NextFunction } from 'express'
 import { getGameById, getGamesToday, getGameMeta } from '../../db/queries/games'
 import { getNewsByGameId, getSignalsByGameId } from '../../db/queries/signals'
 import { getCoachSuggestion, getCoachMetrics } from '../../services/coach'
+import { getCoachSuggestions } from '../../services/coachSuggestions'
 import axios from 'axios'
 
 const router = Router()
@@ -43,6 +44,16 @@ router.get('/today', (_req: Request, res: Response, next: NextFunction): void =>
 // GET /games/coach/metrics
 router.get('/coach/metrics', (_req: Request, res: Response): void => {
   res.json(getCoachMetrics())
+})
+
+// GET /games/coach/suggestions
+router.get('/coach/suggestions', async (_req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const result = await getCoachSuggestions()
+    res.json(result)
+  } catch (err) {
+    next(err)
+  }
 })
 
 // GET /games/:id

@@ -12,6 +12,34 @@ function actionLabel(action: 'entrar_back' | 'entrar_lay' | 'aguardar' | 'sair')
   return 'AGUARDAR'
 }
 
+function marketLabel(market: string | null): string | null {
+  if (!market) return null
+
+  const map: Record<string, string> = {
+    backHome: 'Back Casa',
+    backAway: 'Back Visitante',
+    layHome: 'Lay Casa',
+    layAway: 'Lay Visitante',
+    over25: 'Over 2.5',
+    under25: 'Under 2.5',
+    btts: 'BTTS',
+  }
+
+  return map[market] ?? market
+}
+
+function urgencyLabel(urgency: 'baixa' | 'media' | 'alta'): string {
+  if (urgency === 'alta') return 'Alta'
+  if (urgency === 'media') return 'Media'
+  return 'Baixa'
+}
+
+function urgencyTone(urgency: 'baixa' | 'media' | 'alta'): string {
+  if (urgency === 'alta') return 'text-rose-300'
+  if (urgency === 'media') return 'text-amber-300'
+  return 'text-emerald-300'
+}
+
 export function CoachCard({ gameId, isLive }: { gameId: string; isLive: boolean }) {
   const { enabled, toggle, ready } = useCoachToggle(gameId)
 
@@ -67,9 +95,23 @@ export function CoachCard({ gameId, isLive }: { gameId: string; isLive: boolean 
             </span>
           </div>
           <p className="text-sm leading-relaxed">{data.text}</p>
+          {data.exposure && (
+            <div className="rounded-lg border border-white/10 bg-white/5 p-2.5 space-y-1.5">
+              <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                <span>Exposicao: {data.exposure.minMinutes}-{data.exposure.maxMinutes} min</span>
+                <span>· Revisar aos {data.exposure.reviewAtMinute}'</span>
+                <span className={cn('font-medium', urgencyTone(data.exposure.urgency))}>
+                  · Urgencia: {urgencyLabel(data.exposure.urgency)}
+                </span>
+              </div>
+              {data.exposure.exitTriggers.length > 0 && (
+                <p className="text-xs text-muted-foreground leading-relaxed">Saida: {data.exposure.exitTriggers[0]}</p>
+              )}
+            </div>
+          )}
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
             <span>Confianca {confidence}%</span>
-            {data.market && <span>· Mercado: {data.market}</span>}
+            {data.market && <span>· Mercado: {marketLabel(data.market)}</span>}
             {data.fromCache && <span>· cache</span>}
           </div>
         </div>
