@@ -3,6 +3,7 @@ import { getGameById, getGamesToday, getGameMeta } from '../../db/queries/games'
 import { getNewsByGameId, getSignalsByGameId } from '../../db/queries/signals'
 import { getCoachSuggestion, getCoachMetrics } from '../../services/coach'
 import { getCoachSuggestions } from '../../services/coachSuggestions'
+import { getAttackStats } from '../../services/attackTracker'
 import axios from 'axios'
 
 const router = Router()
@@ -148,6 +149,17 @@ router.get('/:id/best-players', (req, res, next) =>
 // GET /games/:id/graph (attack momentum)
 router.get('/:id/graph', (req, res, next) =>
   proxyMatch(req, res, next, 'graph', { points: [] }))
+
+// GET /games/:id/attack-stats
+router.get('/:id/attack-stats', (req: Request, res: Response, next: NextFunction): void => {
+  try {
+    const gameId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id
+    const meta = getGameMeta(gameId)
+    if (!meta?.exchangeEventId) { res.json(null); return }
+    const stats = getAttackStats(meta.exchangeEventId)
+    res.json(stats)
+  } catch (err) { next(err) }
+})
 
 // GET /games/:id/squad/:side (home or away)
 router.get('/:id/squad/:side', async (req: Request, res: Response, next: NextFunction): Promise<void> => {

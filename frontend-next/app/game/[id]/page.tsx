@@ -21,6 +21,7 @@ import { AttackMomentum } from '@/components/game/AttackMomentum'
 import { MatchOverview } from '@/components/game/MatchOverview'
 import { PpmChart } from '@/components/game/PpmChart'
 import { CoachCard } from '@/components/game/CoachCard'
+import { AttackDonut } from '@/components/game/AttackDonut'
 
 function kickoffBRT(iso: string) {
   return new Date(iso).toLocaleString('pt-BR', {
@@ -319,6 +320,7 @@ function LiveSection({ gameId, homeTeam, awayTeam }: { gameId: string; homeTeam:
           )}
         </>
       )}
+      <AttackDonut gameId={gameId} homeTeam={homeTeam} awayTeam={awayTeam} />
       <CoachCard gameId={gameId} isLive={coachLive} />
       {liveAvailable && (() => {
         if (!liveStats?.stats?.length) {

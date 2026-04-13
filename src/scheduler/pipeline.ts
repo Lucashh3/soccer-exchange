@@ -6,6 +6,7 @@ import { upsertNews } from '../db/queries/signals'
 import { upsertOutcome } from '../db/queries/outcomes'
 import { updatePlayerImpact } from '../db/queries/playerImpact'
 import { matchGamesToExchange } from '../scrapers/bolsaExchange'
+import { pollAttackStats } from '../services/attackTracker'
 import type { ScrapedGame } from '../types/index'
 
 async function syncExchangeLinks(games: ScrapedGame[]): Promise<void> {
@@ -107,6 +108,15 @@ export async function runStatusUpdate(): Promise<void> {
       }
     }
     await syncExchangeLinks(scrapedGames)
+
+    // Poll attack stats for live games that have exchange event ID
+    const liveGames = scrapedGames.filter(g => {
+      const status = g.status ?? ''
+      return ['inprogress', 'live', 'halftime', 'pause'].includes(status) && g.exchangeEventId
+    })
+    await Promise.allSettled(liveGames.map(g => pollAttackStats(g.exchangeEventId!)))
+    if (liveGames.length > 0) console.log(`[pipeline] Polled attack stats for ${liveGames.length} live games`)
+
     console.log(`[pipeline] Updated status for ${scrapedGames.length} games, ${outcomesRecorded} outcomes recorded`)
   } catch (err) {
     console.error('[pipeline] Failed to update game statuses:', err)

@@ -104,13 +104,13 @@ export function updateGameExchangeLink(gameId: string, exchangeEventId: string |
   `).run(exchangeEventId, exchangeUrl, gameId)
 }
 
-export function getGameMeta(id: string): { sofascoreId: number | null; homeTeamId: number | null; awayTeamId: number | null } | null {
+export function getGameMeta(id: string): { sofascoreId: number | null; homeTeamId: number | null; awayTeamId: number | null; exchangeEventId: string | null } | null {
   const db = getDb()
-  const row = db.prepare(`SELECT sofascore_id, home_team_id, away_team_id FROM games WHERE id = ?`).get(id) as
-    | { sofascore_id: number | null; home_team_id: number | null; away_team_id: number | null }
+  const row = db.prepare(`SELECT sofascore_id, home_team_id, away_team_id, exchange_event_id FROM games WHERE id = ?`).get(id) as
+    | { sofascore_id: number | null; home_team_id: number | null; away_team_id: number | null; exchange_event_id: string | null }
     | undefined
   if (!row) return null
-  return { sofascoreId: row.sofascore_id, homeTeamId: row.home_team_id, awayTeamId: row.away_team_id }
+  return { sofascoreId: row.sofascore_id, homeTeamId: row.home_team_id, awayTeamId: row.away_team_id, exchangeEventId: row.exchange_event_id ?? null }
 }
 
 export function getGameById(id: string): Game | null {
