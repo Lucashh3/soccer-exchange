@@ -9,6 +9,9 @@ import type { Game, MarketType } from '@/types'
 import { cn } from '@/lib/utils'
 import { useFavorites } from '@/hooks/useFavorites'
 import { useCoachSuggestions } from '@/hooks/useCoachSuggestions'
+import { CoachCalendar } from '@/components/coach/CoachCalendar'
+import { Dialog, DialogTrigger, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { BarChart2 } from 'lucide-react'
 
 type FilterTab = 'all' | MarketType
 type SortKey = 'time' | 'confidence' | 'probability'
@@ -20,7 +23,6 @@ type StatusFilter =
 
 const MARKET_TABS: { id: FilterTab; label: string }[] = [
   { id: 'all',      label: 'Todos'       },
-  { id: 'btts',     label: 'BTTS'        },
   { id: 'over25',   label: 'Over 2.5'    },
   { id: 'backHome', label: 'Back Casa'   },
   { id: 'layHome',  label: 'Lay Casa'    },
@@ -133,9 +135,9 @@ function StatusSection({
     return (
       <div className="space-y-3">
         <h2 className="text-xs font-bold text-muted-foreground uppercase tracking-widest">{title}</h2>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           {Array.from({ length: 4 }).map((_, i) => (
-            <Skeleton key={i} className="h-[104px] rounded-xl" />
+            <Skeleton key={i} className="h-[120px] rounded-[20px]" />
           ))}
         </div>
       </div>
@@ -150,7 +152,7 @@ function StatusSection({
         {title}
         <span className="font-mono font-normal opacity-60">{games.length}</span>
       </h2>
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
         {games.map((game) => (
           <motion.div
             key={game.id}
@@ -200,7 +202,7 @@ function CoachSuggestionsView({
   if (isLoading) {
     return (
       <div className="space-y-3">
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           {Array.from({ length: 4 }).map((_, i) => (
             <Skeleton key={i} className="h-[130px] rounded-xl" />
           ))}
@@ -223,15 +225,33 @@ function CoachSuggestionsView({
     : null
 
   return (
-    <div className="space-y-4">
-      {updatedAt && (
-        <p className="text-xs text-muted-foreground font-mono">
-          {suggestedGames.length} jogos selecionados pelo Coach
-          {' · '}atualizado às {updatedAt}
-          {fromCache && ' · cache'}
-        </p>
-      )}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        {updatedAt ? (
+          <p className="text-xs text-muted-foreground font-mono">
+            {suggestedGames.length} jogos selecionados pelo Coach
+            {' · '}atualizado às {updatedAt}
+            {fromCache && ' · cache'}
+          </p>
+        ) : <span />}
+
+        <Dialog>
+          <DialogTrigger
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-white/[0.05] border border-transparent hover:border-border transition-all"
+          >
+            <BarChart2 className="w-3.5 h-3.5" />
+            Histórico
+          </DialogTrigger>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Histórico de Acerto — Coach</DialogTitle>
+            </DialogHeader>
+            <CoachCalendar />
+          </DialogContent>
+        </Dialog>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
         {suggestedGames.map(({ game, rationale }) => (
           <motion.div
             key={game.id}

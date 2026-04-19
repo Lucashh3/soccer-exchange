@@ -72,6 +72,8 @@ interface GameContext {
   numericalAdvantage: 'home' | 'away' | 'equal'
 }
 
+type DetectedStrategy = 'drakito' | 'vovo' | 'lay_favorito_2t' | 'lay_favorito_1t' | null
+
 const coachCache = new Map<string, CoachCacheEntry>()
 
 interface CoachTelemetry {
@@ -172,6 +174,99 @@ function clamp(min: number, value: number, max: number): number {
   return Math.max(min, Math.min(max, value))
 }
 
+function computeAttackRate(liveStats: LiveStatItem[], minute: number): { home: number; away: number } {
+  if (minute <= 0) return { home: 0, away: 0 }
+  const attackKeys = ['attacks', 'dangerous attacks', 'ataques', 'ataques perigosos', 'dangerous_attacks']
+  const stat = liveStats.find((s) => attackKeys.includes(s.name.toLowerCase().trim()))
+  if (!stat) return { home: 0, away: 0 }
+  const home = (parseFloat(String(stat.home ?? 0)) || 0) / minute
+  const away = (parseFloat(String(stat.away ?? 0)) || 0) / minute
+  return { home: Math.round(home * 100) / 100, away: Math.round(away * 100) / 100 }
+}
+
+function detectFavorite(topSignals: Signal[]): { side: 'home' | 'away'; probability: number } | null {
+  const backHome = topSignals.find(s => s.market === 'backHome')
+  const backAway = topSignals.find(s => s.market === 'backAway')
+  const layAway  = topSignals.find(s => s.market === 'layAway')
+  const layHome  = topSignals.find(s => s.market === 'layHome')
+
+  if (backHome && backHome.probability > 0.60) return { side: 'home', probability: backHome.probability }
+  if (layAway  && layAway.probability  > 0.70) return { side: 'home', probability: layAway.probability }
+  if (backAway && backAway.probability > 0.60) return { side: 'away', probability: backAway.probability }
+  if (layHome  && layHome.probability  > 0.70) return { side: 'away', probability: layHome.probability }
+  return null
+}
+
+function detectStrategy(params: {
+  minute: number
+  period: number | null | undefined
+  homeScore: number
+  awayScore: number
+  ppm: { score: number; side: 'home' | 'away' | 'neutral' }
+  attackRate: { home: number; away: number }
+  topSignals: Signal[]
+}): DetectedStrategy {
+  const { minute, period, homeScore, awayScore, ppm, attackRate, topSignals } = params
+
+  // Drakito: 1st half, exactly 1x0, favorite pressing hard, underdog not reacting
+  const isFirstHalf = period === 1 || (period == null && minute <= 45)
+  const isDrakitoScore = (homeScore === 1 && awayScore === 0) || (homeScore === 0 && awayScore === 1)
+  const favoriteIsHome = homeScore > awayScore
+  const favoritePressingPpm = (favoriteIsHome && ppm.side === 'home') || (!favoriteIsHome && ppm.side === 'away')
+  const favoriteAttackRate = favoriteIsHome ? attackRate.home : attackRate.away
+  const zebraAttackRate = favoriteIsHome ? attackRate.away : attackRate.home
+  const zebraNotReacting = zebraAttackRate < 0.3 || (favoriteAttackRate > 0 && favoriteAttackRate >= zebraAttackRate * 1.5)
+
+  if (
+    isFirstHalf &&
+    isDrakitoScore &&
+    minute >= 5 &&
+    minute <= 43 &&
+    ppm.score >= 65 &&
+    favoritePressingPpm &&
+    zebraNotReacting
+  ) {
+    return 'drakito'
+  }
+
+  // Vovó: 2nd half 75+, team leading with sustained momentum
+  const scoreDiff = Math.abs(homeScore - awayScore)
+  const leadingIsHome = homeScore > awayScore
+  const ppmMatchesLeader = (leadingIsHome && ppm.side === 'home') || (!leadingIsHome && ppm.side === 'away')
+
+  if (minute >= 75 && scoreDiff >= 1 && ppm.score >= 55 && ppmMatchesLeader) {
+    return 'vovo'
+  }
+
+  // Lay Favorito 2º Tempo: favorite exists, 2nd half, not dominating
+  const isSecondHalf = period === 2 || (period == null && minute > 45)
+  if (isSecondHalf && minute >= 50 && minute <= 82) {
+    const favorite = detectFavorite(topSignals)
+    if (favorite && favorite.probability >= 0.62) {
+      const favAttack  = favorite.side === 'home' ? attackRate.home : attackRate.away
+      const zebraAttack = favorite.side === 'home' ? attackRate.away : attackRate.home
+      const favNotDominating = zebraAttack > 0 && favAttack <= zebraAttack * 1.5
+      const ppmNotFavFavorite = ppm.side !== favorite.side || ppm.score < 55
+      if (favNotDominating && ppmNotFavFavorite) return 'lay_favorito_2t'
+    }
+  }
+
+  // Lay Favorito 1º Tempo: underdog dominating in 1st half
+  if (isFirstHalf && minute >= 12 && minute <= 42) {
+    const favorite = detectFavorite(topSignals)
+    if (favorite && favorite.probability >= 0.62) {
+      const favAttack   = favorite.side === 'home' ? attackRate.home : attackRate.away
+      const zebraAttack = favorite.side === 'home' ? attackRate.away : attackRate.home
+      const zebraSide: 'home' | 'away' = favorite.side === 'home' ? 'away' : 'home'
+      const zebraDominating = zebraAttack > 0 && zebraAttack > favAttack * 1.3
+      const ppmFavorsZebra  = ppm.side === zebraSide && ppm.score >= 55
+      if (zebraDominating && ppmFavorsZebra) return 'lay_favorito_1t'
+    }
+  }
+
+  return null
+}
+
 function extractGameContext(liveData: LiveData, currentMinute: number): GameContext {
   const events = liveData.events ?? []
 
@@ -255,7 +350,7 @@ function computePpmSignal(points: MomentumPoint[], minute: number, homeScore: nu
 
 function summarizeNews(news: NewsItem[]): string[] {
   return news
-    .slice(0, 5)
+    .slice(0, 2)
     .map((item) => {
       const source = item.source ? ` (${item.source})` : ''
       return `${item.title}${source}`.trim()
@@ -291,9 +386,11 @@ function buildCoachPrompt(input: {
   topSignals: Signal[]
   deterministic: { action: CoachAction; side: 'home' | 'away' | 'neutral'; market: string | null; confidence: number }
   gameContext: GameContext
+  strategy: DetectedStrategy
+  attackRate: { home: number; away: number }
 }): string {
   const liveStatsBlock = input.liveStats.length > 0
-    ? input.liveStats.slice(0, 8).map((s) => `- ${s.name}: ${s.home ?? 'N/A'} x ${s.away ?? 'N/A'}`).join('\n')
+    ? input.liveStats.slice(0, 4).map((s) => `- ${s.name}: ${s.home ?? 'N/A'} x ${s.away ?? 'N/A'}`).join('\n')
     : '- Sem estatisticas ao vivo relevantes no momento.'
 
   const newsBlock = input.newsSummary.length > 0
@@ -345,6 +442,61 @@ function buildCoachPrompt(input: {
           ? 'SAIR da posicao atual (reduzir ou fechar exposicao)'
           : 'AGUARDAR (sem entrada recomendada neste momento)'
 
+  const attackRateBlock = (input.attackRate.home > 0 || input.attackRate.away > 0)
+    ? `- ${input.homeTeam}: ${input.attackRate.home.toFixed(2)} ataques/min | ${input.awayTeam}: ${input.attackRate.away.toFixed(2)} ataques/min`
+    : '- Taxa de ataques indisponivel.'
+
+  const strategyBlock: string[] = []
+  if (input.strategy === 'drakito') {
+    const zebraTeam = input.homeScore > input.awayScore ? input.awayTeam : input.homeTeam
+    const favoriteTeam = input.homeScore > input.awayScore ? input.homeTeam : input.awayTeam
+    strategyBlock.push(
+      '## Estrategia detectada: DRAKITO',
+      `- Configuracao: ${favoriteTeam} fez 1x0 no 1o tempo e mantem pressao intensa (${zebraTeam} nao reage).`,
+      `- Acao recomendada: Lay na Zebra (${zebraTeam}) no Match Odds — apostar CONTRA o time perdendo.`,
+      '- Objetivo principal: capturar o 2x0 (green maximo, proporcao ~2:1 a 3:1 sobre o risco).',
+      '- Protecao de tempo: sem gol, ganhe 1-4% em ticks ate o apito do intervalo.',
+      '- Risco calculado: se a zebra empatar, a odd volta ao nivel de abertura (~8-15% de responsabilidade).',
+      '- SAIDA OBRIGATORIA no intervalo se o 2x0 nao ocorrer.',
+      `- ABORT imediato: ${zebraTeam} comecar a pressionar (PPM zebra sobe) ou ${favoriteTeam} parar de atacar.`,
+      '',
+    )
+  } else if (input.strategy === 'vovo') {
+    const leadTeam = input.homeScore > input.awayScore ? input.homeTeam : input.awayTeam
+    strategyBlock.push(
+      '## Estrategia detectada: VOVO',
+      `- Configuracao: ${leadTeam} liderando no minuto ${input.minute} com momentum favoravel. Passagem do tempo valoriza a posicao.`,
+      `- Acao recomendada: Back no ${leadTeam} (Match Odds) a odds baixas — fechar proximo de 1.01 no apito final (~4% de lucro).`,
+      '- Risco: gol adversario pode gerar prejuizo de 15-25%. Stake reduzido e gestao de saida atenta.',
+      '',
+    )
+  } else if (input.strategy === 'lay_favorito_2t') {
+    const favTeam   = input.deterministic.side === 'home' ? input.homeTeam : input.awayTeam
+    const zebraTeam = input.deterministic.side === 'home' ? input.awayTeam : input.homeTeam
+    strategyBlock.push(
+      '## Estrategia detectada: LAY FAVORITO 2º TEMPO',
+      `- Configuracao: ${favTeam} e o favorito (odds comprimidas) mas NAO esta dominando no 2o tempo. ${zebraTeam} resistindo.`,
+      `- Acao: Lay no ${favTeam} no Match Odds — apostar CONTRA o favorito enquanto ele nao pressiona.`,
+      '- REGRA CRITICA: Se tomar gol do favorito, NAO feche a posicao. Mantenha ate o apito final.',
+      `- Um gol de empate de ${zebraTeam} nao apenas recupera o prejuizo como pode gerar +140% de retorno.`,
+      `- ABORT se ${favTeam} comecar a dominar (PPM subir acima de 70 por 3 leituras consecutivas).`,
+      '- Calcule a responsabilidade antes de entrar: Stake × (Odd - 1).',
+      '',
+    )
+  } else if (input.strategy === 'lay_favorito_1t') {
+    const favTeam   = input.deterministic.side === 'home' ? input.homeTeam : input.awayTeam
+    const zebraTeam = input.deterministic.side === 'home' ? input.awayTeam : input.homeTeam
+    strategyBlock.push(
+      '## Estrategia detectada: LAY FAVORITO 1º TEMPO',
+      `- Configuracao: ${zebraTeam} dominando o 1o tempo contra o favorito ${favTeam}. Odds do favorito exageradas para o que acontece em campo.`,
+      `- Acao: Lay no ${favTeam} enquanto ${zebraTeam} domina — cada ataque inofensivo do favorito faz a odd corrigir a seu favor.`,
+      '- SAIDA DE EMERGENCIA IMEDIATA: Abort se o favorito recuperar escanteio, falta perigosa ou contra-ataque.',
+      '- Nao lute com o mercado — no 1o tempo ele protege o favorito intensamente.',
+      '- Saida obrigatoria no intervalo (minuto 45) independente do resultado.',
+      '',
+    )
+  }
+
   return [
     'Voce e um coach de trading in-play em futebol, especializado em Betfair Exchange.',
     'Sua tarefa e redigir a mensagem operacional e os codigos de razao para uma decisao ja tomada pelo sistema.',
@@ -364,6 +516,9 @@ function buildCoachPrompt(input: {
     '## Contexto ao vivo',
     liveStatsBlock,
     '',
+    '## Taxa de ataques por minuto',
+    attackRateBlock,
+    '',
     '## Momentum (PPM)',
     `score=${input.ppm.score}, recommendation=${input.ppm.recommendation}, side=${input.ppm.side}`,
     '',
@@ -373,6 +528,7 @@ function buildCoachPrompt(input: {
     '## Noticias pre-jogo',
     newsBlock,
     '',
+    ...strategyBlock,
     '## Decisao do sistema (nao altere — apenas justifique e escreva a mensagem)',
     `action: ${action}`,
     `descricao: ${actionDesc}`,
@@ -437,7 +593,7 @@ function buildSnapshotHash(input: {
   homePlayerCount: number
   awayPlayerCount: number
 }): string {
-  const minuteBucket = Math.floor(input.minute / 2)
+  const minuteBucket = Math.floor(input.minute / 5)
   const topSignalPart = input.topSignal
     ? `${input.topSignal.market}:${input.topSignal.probability.toFixed(3)}:${input.topSignal.confidence.toFixed(3)}`
     : 'none'
@@ -481,8 +637,63 @@ function buildExposureGuidance(params: {
   homeScore: number
   awayScore: number
   gameContext: GameContext
+  strategy: DetectedStrategy
 }): CoachExposureGuidance | null {
   if (params.action !== 'entrar_back' && params.action !== 'entrar_lay') return null
+
+  // Lay Favorito 2º Tempo: hold through goals, exit only if favorite dominates
+  if (params.strategy === 'lay_favorito_2t') {
+    const minutesLeft = Math.max(5, 90 - params.minute)
+    const favTeam = params.side === 'home' ? 'casa' : 'visitante'
+    return {
+      minMinutes: 5,
+      maxMinutes: minutesLeft,
+      reviewAtMinute: 90,
+      urgency: params.minute >= 75 ? 'alta' : 'media',
+      exitTriggers: [
+        `Se tomar gol do favorito (${favTeam}), NAO feche a posicao — mantenha ate o apito final.`,
+        'Um gol de empate da zebra recupera o prejuizo e pode gerar +140% de retorno.',
+        'ABORT se PPM do favorito subir acima de 70 por 3 leituras consecutivas.',
+        'Feche parcialmente se a odd cair abaixo de 1.10 para reduzir responsabilidade.',
+        'Responsabilidade = Stake × (Odd - 1). Calcule antes de entrar.',
+      ],
+    }
+  }
+
+  // Lay Favorito 1º Tempo: abort immediately on any market reversal
+  if (params.strategy === 'lay_favorito_1t') {
+    const favTeam = params.side === 'home' ? 'casa' : 'visitante'
+    return {
+      minMinutes: 2,
+      maxMinutes: Math.max(2, 45 - params.minute),
+      reviewAtMinute: Math.min(45, params.minute + 3),
+      urgency: 'alta',
+      exitTriggers: [
+        `ABORT IMEDIATO se ${favTeam} recuperar escanteio, falta perigosa ou contra-ataque.`,
+        'Nao lute com o mercado — no 1o tempo ele protege o favorito intensamente.',
+        'Saida obrigatoria no intervalo (minuto 45) independente do resultado.',
+        'Feche se PPM do favorito subir 10+ pontos em relacao ao momento da entrada.',
+      ],
+    }
+  }
+
+  // Drakito: window ends at halftime — override all standard calculations
+  if (params.strategy === 'drakito') {
+    const zebraTeamSide = params.side === 'home' ? 'casa' : 'visitante'
+    const favoriteTeamSide = params.side === 'home' ? 'visitante' : 'casa'
+    return {
+      minMinutes: 2,
+      maxMinutes: Math.max(2, 45 - params.minute),
+      reviewAtMinute: 45,
+      urgency: params.minute >= 38 ? 'alta' : 'media',
+      exitTriggers: [
+        `Saia IMEDIATAMENTE se a zebra (${zebraTeamSide}) empatar — odd voltara ao nivel de abertura.`,
+        `Saia no apito do intervalo (minuto 45) se o 2x0 nao ocorrer — garanta os ticks de bonus.`,
+        `Abort tatico: se o PPM da zebra subir acima de 50 ou o ${favoriteTeamSide} parar de atacar (taxa de ataques cair).`,
+        `Se o ${favoriteTeamSide} fizer 2x0, feche a posicao imediatamente para capturar o green maximo.`,
+      ],
+    }
+  }
 
   const baseByStrength: Record<'strong' | 'moderate' | 'weak' | 'none', { min: number; max: number }> = {
     strong: { min: 4, max: 8 },
@@ -574,7 +785,6 @@ function marketLabel(market: string | null): string {
     layAway: 'Lay Visitante',
     over25: 'Over 2.5',
     under25: 'Under 2.5',
-    btts: 'BTTS',
   }
   if (!market) return 'mercado indefinido'
   return labels[market] ?? market
@@ -638,11 +848,71 @@ function getDirectionalSignal(signals: Signal[]): Signal | null {
 
 function buildDeterministicDecision(params: {
   minute: number
+  homeScore: number
+  awayScore: number
   ppm: { score: number; recommendation: 'strong' | 'moderate' | 'weak' | 'none'; side: 'home' | 'away' | 'neutral' }
   topSignals: Signal[]
   gameContext: GameContext
+  strategy: DetectedStrategy
 }): { action: CoachAction; side: 'home' | 'away' | 'neutral'; market: string | null; confidence: number; reasonCodes: string[] } {
-  const { minute, ppm, topSignals, gameContext } = params
+  const { minute, homeScore, awayScore, ppm, topSignals, gameContext, strategy } = params
+
+  // Drakito override: in-play setup takes priority over pre-match signals
+  if (strategy === 'drakito') {
+    const zebraSide: 'home' | 'away' = homeScore > awayScore ? 'away' : 'home'
+    const zebraMarket = zebraSide === 'away' ? 'layAway' : 'layHome'
+    return {
+      action: 'entrar_lay',
+      side: zebraSide,
+      market: zebraMarket,
+      confidence: clamp(65, ppm.score, 90),
+      reasonCodes: ['drakito_setup', 'first_half_1x0', 'favorite_pressing'],
+    }
+  }
+
+  // Vovó override: back the leader late in the game
+  if (strategy === 'vovo') {
+    const leaderSide: 'home' | 'away' = homeScore > awayScore ? 'home' : 'away'
+    const leaderMarket = leaderSide === 'home' ? 'backHome' : 'backAway'
+    return {
+      action: 'entrar_back',
+      side: leaderSide,
+      market: leaderMarket,
+      confidence: clamp(55, ppm.score, 85),
+      reasonCodes: ['vovo_setup', 'late_game_time_decay', 'leader_momentum'],
+    }
+  }
+
+  // Lay Favorito 2º Tempo: favorite not performing in 2nd half
+  if (strategy === 'lay_favorito_2t') {
+    const favorite = detectFavorite(topSignals)
+    if (favorite) {
+      const market = favorite.side === 'home' ? 'layHome' : 'layAway'
+      return {
+        action: 'entrar_lay',
+        side: favorite.side,
+        market,
+        confidence: clamp(60, Math.round(ppm.score * 0.5 + favorite.probability * 50), 85),
+        reasonCodes: ['lay_favorito_2t', 'second_half_fav_not_dominating', 'hold_if_goal_conceded'],
+      }
+    }
+  }
+
+  // Lay Favorito 1º Tempo: underdog dominating in 1st half
+  if (strategy === 'lay_favorito_1t') {
+    const favorite = detectFavorite(topSignals)
+    if (favorite) {
+      const market = favorite.side === 'home' ? 'layHome' : 'layAway'
+      return {
+        action: 'entrar_lay',
+        side: favorite.side,
+        market,
+        confidence: clamp(55, Math.round(ppm.score * 0.55 + favorite.probability * 45), 80),
+        reasonCodes: ['lay_favorito_1t', 'first_half_zebra_dominating', 'abort_on_fav_recovery'],
+      }
+    }
+  }
+
   const directionalSignal = getDirectionalSignal(topSignals)
   const signalConfidencePct = directionalSignal ? Math.round((directionalSignal.confidence ?? 0) * 100) : 0
   const blendedConfidence = clamp(0, Math.round(ppm.score * 0.65 + signalConfidencePct * 0.35), 100)
@@ -815,8 +1085,18 @@ export async function getCoachSuggestion(input: CoachInput): Promise<CoachRespon
 
   const gameContext = extractGameContext(input.liveData, minute)
   const ppm = computePpmSignal(input.graphPoints, minute, homeScore, awayScore)
+  const attackRate = computeAttackRate(input.liveStats, minute)
   const newsSummary = summarizeNews(input.news)
   const topSignals = input.signals.slice(0, 3)
+  const strategy = detectStrategy({
+    minute,
+    period: input.liveData.clock?.period ?? null,
+    homeScore,
+    awayScore,
+    ppm,
+    attackRate,
+    topSignals,
+  })
 
   const snapshotHash = buildSnapshotHash({
     minute,
@@ -848,7 +1128,7 @@ export async function getCoachSuggestion(input: CoachInput): Promise<CoachRespon
     return response
   }
 
-  const deterministic = buildDeterministicDecision({ minute, ppm, topSignals, gameContext })
+  const deterministic = buildDeterministicDecision({ minute, homeScore, awayScore, ppm, topSignals, gameContext, strategy })
 
   const prompt = buildCoachPrompt({
     homeTeam: input.homeTeam,
@@ -864,6 +1144,8 @@ export async function getCoachSuggestion(input: CoachInput): Promise<CoachRespon
     topSignals,
     deterministic,
     gameContext,
+    strategy,
+    attackRate,
   })
 
   const contextUsed = {
@@ -934,6 +1216,7 @@ export async function getCoachSuggestion(input: CoachInput): Promise<CoachRespon
       homeScore,
       awayScore,
       gameContext,
+      strategy,
     })
     const text = normalizeCoachText({
       action: deterministic.action,

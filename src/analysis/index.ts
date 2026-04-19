@@ -56,7 +56,7 @@ function computeDataQuality(stats: TeamStats | null): number {
   let count = 0
   const fields: (keyof TeamStats)[] = [
     'goalsScoredAvg', 'goalsConcededAvg', 'xgAvg', 'xgConcededAvg',
-    'bttsPct', 'over25Pct', 'formLast5',
+    'over25Pct', 'formLast5',
   ]
   for (const field of fields) {
     count++
@@ -211,24 +211,6 @@ function generateSignals(
   const homeRegression = getFormRegression(homeStats)
   const awayRegression = getFormRegression(awayStats)
 
-  if (probabilities.btts > 0.6) {
-    const homeBigChances = homeStats?.bigChancesCreatedAvg ?? 0
-    const awayBigChances = awayStats?.bigChancesCreatedAvg ?? 0
-    const homeGoalRich = (homeStats?.goalsScoredAvg ?? 0) > 1.3 || homeBigChances > 1.5
-    const awayGoalRich = (awayStats?.goalsScoredAvg ?? 0) > 1.3 || awayBigChances > 1.5
-    const homeLowChances = homeBigChances > 0 && homeBigChances < 0.8
-    const awayLowChances = awayBigChances > 0 && awayBigChances < 0.8
-    let baseConf = homeGoalRich && awayGoalRich ? 0.8 : 0.6
-    if (homeBigChances > 1.5 && awayBigChances > 1.5) baseConf = 0.9
-    if (homeLowChances || awayLowChances) baseConf = Math.min(baseConf, 0.5)
-    signals.push({
-      market: 'btts',
-      recommendation: 'back',
-      probability: probabilities.btts,
-      confidence: Math.min(baseConf * avgQuality * sourceBoost * riskMultiplier, 1),
-    })
-  }
-
   if (probabilities.over25 > 0.55) {
     signals.push({
       market: 'over25',
@@ -342,7 +324,6 @@ export async function analyzeGame(gameId: string): Promise<void> {
     homeWin: number
     draw: number
     awayWin: number
-    btts: number
     over25: number
     under25: number
   } | null = null
@@ -391,7 +372,6 @@ export async function analyzeGame(gameId: string): Promise<void> {
           homeWin: final1x2.homeWin,
           draw: final1x2.draw,
           awayWin: final1x2.awayWin,
-          btts: poissonMarkets.btts,
           over25: poissonMarkets.over25,
           under25: poissonMarkets.under25,
         }
@@ -400,7 +380,6 @@ export async function analyzeGame(gameId: string): Promise<void> {
           homeWin: probabilities.homeWin,
           draw: probabilities.draw,
           awayWin: probabilities.awayWin,
-          btts: probabilities.btts,
           over25: probabilities.over25,
           under25: probabilities.under25,
         }

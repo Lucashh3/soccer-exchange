@@ -1,7 +1,7 @@
 import cron from 'node-cron'
 import { execFile } from 'child_process'
 import path from 'path'
-import { runMorningPipeline, runLineupCheck, runStatusUpdate } from './pipeline'
+import { runMorningPipeline, runLineupCheck, runStatusUpdate, runAttackPoll } from './pipeline'
 import { reloadModels } from '../analysis/mlPredictor'
 
 export function startCron(): void {
@@ -50,5 +50,12 @@ export function startCron(): void {
     })
   })
 
-  console.log('[cron] Scheduled: morning pipeline at 5:00 AM, status update every 2 min, lineup check every 5 min, fine-tuning every Sunday at 3:00 AM')
+  // Attack stats poll every 1 minute (para calcular janelas de 5/10 min)
+  cron.schedule('* * * * *', async () => {
+    try { await runAttackPoll() } catch (err) {
+      console.error('[cron] Attack poll failed:', err)
+    }
+  })
+
+  console.log('[cron] Scheduled: morning pipeline at 5:00 AM, status update every 2 min, attack poll every 1 min, lineup check every 5 min, fine-tuning every Sunday at 3:00 AM')
 }

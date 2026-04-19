@@ -6,7 +6,7 @@ export function useCoachSuggestions(enabled: boolean) {
     queryKey: ['coach-suggestions'],
     queryFn: fetchCoachSuggestions,
     enabled,
-    refetchInterval: 30 * 60 * 1000, // 30 min
-    staleTime: 25 * 60 * 1000,
+    refetchInterval: false,
+    staleTime: 24 * 60 * 60 * 1000, // 24h — análise pré-jogo, gerada uma vez por dia
   })
 }

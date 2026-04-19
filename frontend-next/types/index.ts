@@ -1,5 +1,5 @@
 export type MarketType =
-  | 'btts' | 'over25' | 'under25' | 'lay00' | 'value'
+  | 'over25' | 'under25' | 'lay00' | 'value'
   | 'backHome' | 'layHome' | 'backAway' | 'layAway'
 
 export type Recommendation = 'back' | 'lay' | 'skip'
@@ -9,7 +9,6 @@ export interface TeamStats {
   xgConcededAvg?: number
   goalsScoredAvg?: number
   goalsConcededAvg?: number
-  bttsPct?: number
   over25Pct?: number
   under25Pct?: number
   formLast5?: string

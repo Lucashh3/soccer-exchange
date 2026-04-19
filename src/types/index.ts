@@ -1,7 +1,6 @@
 // Mirror of frontend types plus internal DB types
 
 export type MarketType =
-  | 'btts'
   | 'over25'
   | 'under25'
   | 'lay00'
@@ -18,7 +17,6 @@ export interface TeamStats {
   xgConcededAvg?: number
   goalsScoredAvg?: number
   goalsConcededAvg?: number
-  bttsPct?: number
   over25Pct?: number
   under25Pct?: number
   formLast5?: string
@@ -133,7 +131,6 @@ export interface TeamStatsRow {
   xg_conceded_avg: number | null
   goals_scored_avg: number | null
   goals_conceded_avg: number | null
-  btts_pct: number | null
   over25_pct: number | null
   under25_pct: number | null
   form_last5: string | null
@@ -253,7 +250,6 @@ export interface Probabilities {
   homeWin: number
   draw: number
   awayWin: number
-  btts: number
   over25: number
   under25: number
 }

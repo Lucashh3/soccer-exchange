@@ -9,7 +9,6 @@ export const MARKET_CONFIG: Record<MarketType, {
   border: string
   glow: string
 }> = {
-  btts:     { label: 'BTTS',         color: '#34d399', bg: 'rgba(52,211,153,0.12)',   border: 'rgba(52,211,153,0.3)',   glow: 'glow-btts'  },
   over25:   { label: 'Over 2.5',     color: '#f97316', bg: 'rgba(249,115,22,0.12)',   border: 'rgba(249,115,22,0.3)',   glow: 'glow-over'  },
   under25:  { label: 'Under 2.5',    color: '#818cf8', bg: 'rgba(129,140,248,0.12)',  border: 'rgba(129,140,248,0.3)',  glow: ''           },
   lay00:    { label: 'Lay 0-0',      color: '#a855f7', bg: 'rgba(168,85,247,0.12)',   border: 'rgba(168,85,247,0.3)',   glow: ''           },
@@ -30,15 +29,22 @@ export function MarketBadge({ market, size = 'sm', className }: Props) {
   const c = MARKET_CONFIG[market]
   const sizeClass = size === 'lg' ? 'px-3 py-1 text-sm' : size === 'md' ? 'px-2.5 py-0.5 text-xs' : 'px-2 py-0.5 text-xs'
 
+  if (!c) return null
+
   return (
     <Badge
       variant="outline"
-      className={cn('font-semibold rounded-full border font-mono', sizeClass, c.glow, className)}
-      style={{ color: c.color, backgroundColor: c.bg, borderColor: c.border }}
+      className={cn('font-semibold rounded-xl border font-mono tracking-wide', sizeClass, className)}
+      style={{
+        color: c.color,
+        backgroundColor: c.bg,
+        borderColor: c.border,
+        boxShadow: `inset 0 1px 0 0 rgba(255,255,255,0.06)`,
+      }}
     >
       {c.label}
     </Badge>
   )
 }
 
-export function marketColor(m: MarketType) { return MARKET_CONFIG[m].color }
+export function marketColor(m: MarketType) { return MARKET_CONFIG[m]?.color ?? '#6b7280' }

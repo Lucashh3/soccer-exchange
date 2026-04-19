@@ -2,6 +2,8 @@
 
 import { useRouter } from 'next/navigation'
 import { useState, useEffect, useRef } from 'react'
+import { AnimatePresence, motion } from 'motion/react'
+import { ChevronDown, Activity, LineChart, Sparkles, ArrowLeft } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
 import { useAnalysis } from '@/hooks/useGame'
 import { MarketBadge } from '@/components/signals/MarketBadge'
@@ -168,25 +170,53 @@ function AnalysisReportView({ report }: { report: AnalysisReport }) {
 
 function Section({
   title,
+  type = 'analysis',
   defaultOpen,
   children,
 }: {
   title: string
+  type?: 'live' | 'analysis'
   defaultOpen: boolean
   children: React.ReactNode
 }) {
   const [open, setOpen] = useState(defaultOpen)
+  const isLive = type === 'live'
+  const Icon = isLive ? Activity : LineChart
+
   return (
-    <div className="border border-border rounded-xl overflow-hidden">
+    <section className={cn('rounded-[20px] overflow-hidden transition-colors duration-300', isLive ? 'glass-live' : 'glass-analysis')}>
       <button
         onClick={() => setOpen(o => !o)}
-        className="w-full flex items-center justify-between px-4 py-3 bg-card hover:bg-white/[0.02] transition-colors text-sm font-semibold"
+        className="w-full flex items-center justify-between px-4 py-3.5 group focus:outline-none"
       >
-        {title}
-        <span className="text-muted-foreground text-xs">{open ? '▲' : '▼'}</span>
+        <div className="flex items-center gap-3">
+          <div className={cn('p-1.5 rounded-xl flex items-center justify-center transition-colors', isLive ? 'bg-emerald-500/10 text-emerald-400' : 'bg-white/[0.04] text-white/40')}>
+            <Icon className="w-3.5 h-3.5" />
+          </div>
+          <h3 className={cn('font-semibold tracking-tight text-sm', isLive ? 'text-foreground' : 'text-foreground/75')}>
+            {title}
+          </h3>
+        </div>
+        <motion.div animate={{ rotate: open ? 180 : 0 }} transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }} className="text-white/30 group-hover:text-white/60">
+          <ChevronDown className="w-4 h-4" />
+        </motion.div>
       </button>
-      {open && <div className="px-4 pb-4 pt-2">{children}</div>}
-    </div>
+
+      <AnimatePresence initial={false}>
+        {open && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
+          >
+            <div className="px-4 pb-5 pt-1 border-t border-white/[0.04]">
+              {children}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </section>
   )
 }
 
@@ -823,333 +853,425 @@ export default function GamePage({ params }: { params: { id: string } }) {
 
   return (
     <div className="flex flex-col">
-      {/* Sticky header */}
-      <div className="sticky top-0 z-10 bg-background/95 backdrop-blur border-b border-border px-4 py-3">
-        <div className="max-w-5xl mx-auto">
-          <div className="flex items-center gap-3 mb-1">
-            <button
-              onClick={() => router.back()}
-              className="text-muted-foreground hover:text-foreground transition-colors text-sm"
-            >
-              ← Voltar
-            </button>
-            {isLive && (
-              <span className="flex items-center gap-1.5 text-emerald-400 text-xs">
-                <span className="relative flex h-2 w-2">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-                  <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
+      {/* Premium sticky header */}
+      <div className="sticky top-0 z-10 glass-topbar px-4 py-2.5">
+        <div className="max-w-5xl mx-auto flex items-center gap-3">
+          {/* Back button */}
+          <button
+            onClick={() => router.back()}
+            className="shrink-0 flex items-center gap-1.5 text-muted-foreground hover:text-foreground transition-colors"
+          >
+            <ArrowLeft className="w-4 h-4" />
+            <span className="text-xs hidden sm:inline">Voltar</span>
+          </button>
+
+          {/* Centered scoreboard */}
+          <div className="flex-1 flex items-center justify-center gap-2 min-w-0">
+            <span className="text-sm font-semibold truncate text-right flex-1 min-w-0">
+              {game.homeTeam}
+            </span>
+            <div className="shrink-0 flex flex-col items-center gap-0.5">
+              {isLive ? (
+                <span className="flex items-center gap-1 text-emerald-400 text-[10px] font-semibold tracking-wide uppercase">
+                  <span className="relative flex h-1.5 w-1.5">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                    <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500" />
+                  </span>
+                  Ao Vivo
                 </span>
-                AO VIVO
+              ) : (
+                <span className="text-[10px] text-muted-foreground/50 uppercase tracking-wide">
+                  {isFinished ? 'Encerrado' : kickoffBRT(game.kickoffAt)}
+                </span>
+              )}
+              <span className="text-xs text-muted-foreground px-2 py-0.5 bg-white/[0.04] rounded-md border border-white/[0.06] font-mono">
+                vs
+              </span>
+            </div>
+            <span className="text-sm font-semibold truncate text-left flex-1 min-w-0">
+              {game.awayTeam}
+            </span>
+          </div>
+
+          {/* Signal badge */}
+          <div className="shrink-0 flex items-center gap-2">
+            {!isLive && !isFinished && (
+              <span className="text-[10px] text-muted-foreground/50 hidden sm:inline">
+                {kickoffBRT(game.kickoffAt)}
               </span>
             )}
-          </div>
-          <div className="flex items-center justify-between gap-2">
-            <div className="min-w-0">
-              <p className="text-base font-semibold truncate">
-                {game.homeTeam} <span className="text-muted-foreground font-normal">vs</span> {game.awayTeam}
-              </p>
-              <p className="text-xs text-muted-foreground mt-0.5">
-                {game.league} · {game.country} · {kickoffBRT(game.kickoffAt)}
-              </p>
-            </div>
-            {topSignal && <MarketBadge market={topSignal.market} size="md" />}
+            {topSignal && <MarketBadge market={topSignal.market} size="sm" />}
           </div>
         </div>
+        <p className="text-[10px] text-muted-foreground/40 text-center mt-0.5 max-w-5xl mx-auto">
+          {game.league} · {game.country}
+        </p>
       </div>
 
-      {/* Two-column layout on desktop, single-column on mobile */}
+      {/* Main layout */}
       <div className="max-w-5xl mx-auto w-full px-4 py-4">
-        <div className="flex gap-4 items-start">
+        <div className="flex gap-5 items-start">
 
-          {/* ── Left column: main content ───────────────────────────── */}
-          <div className="flex-1 min-w-0 space-y-2">
-
-            {/* Análise IA */}
-            <Section title="Análise IA" defaultOpen={true}>
-              {report ? (
-                (() => {
-                  const parsed = parseReport(report)
-                  return parsed ? (
-                    <AnalysisReportView report={parsed} />
-                  ) : (
-                    // Fallback para relatórios antigos em texto livre
-                    <ul className="space-y-1.5">
-                      {report.split('\n').filter(Boolean).map((line, i) => (
-                        <li key={i} className="flex gap-2 text-sm text-foreground/70 leading-relaxed">
-                          <span className="text-violet-400/60 shrink-0 mt-0.5">·</span>
-                          <span>{line.replace(/^[-•·#]\s*/, '')}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  )
-                })()
-              ) : (
-                <div className="space-y-2">
-                  {[60, 85, 70, 90, 50].map((w, i) => (
-                    <Skeleton key={i} className="h-3 rounded" style={{ width: `${w}%` }} />
-                  ))}
-                  <p className="text-xs text-muted-foreground/50 pt-1">Aguardando análise...</p>
-                </div>
-              )}
-            </Section>
-
-            {/* Estatísticas */}
-            <Section title="Estatísticas" defaultOpen={true}>
-              <div className="flex justify-between text-xs font-semibold mb-3">
-                <span className="text-sky-400">{game.homeTeam}</span>
-                <span className="text-orange-400">{game.awayTeam}</span>
-              </div>
-              <StatRow label="xG marc." home={h?.xgAvg} away={a?.xgAvg} />
-              <StatRow label="xG sofr." home={h?.xgConcededAvg} away={a?.xgConcededAvg} higherIsBetter={false} />
-              <StatRow label="Gols marc." home={h?.goalsScoredAvg} away={a?.goalsScoredAvg} />
-              <StatRow label="Gols sofr." home={h?.goalsConcededAvg} away={a?.goalsConcededAvg} higherIsBetter={false} />
-              <StatRow label="BTTS %" home={h?.bttsPct} away={a?.bttsPct} format="pct" />
-              <StatRow label="Over 2.5 %" home={h?.over25Pct} away={a?.over25Pct} format="pct" />
-              {h?.possessionAvg != null && <StatRow label="Posse %" home={h.possessionAvg} away={a?.possessionAvg} format="pct" />}
-              {(h?.formLast5 || a?.formLast5) && (
-                <div className="mt-3 pt-3 border-t border-border/50">
-                  <p className="text-xs text-muted-foreground uppercase tracking-widest mb-2">Forma recente</p>
-                  <div className="flex items-center justify-between">
-                    <FormPills form={h?.formLast5} />
-                    <span className="text-xs text-muted-foreground">vs</span>
-                    <FormPills form={a?.formLast5} />
-                  </div>
-                </div>
-              )}
-              {(h || a) && (
-                <div className="mt-4">
-                  <XGChart
-                    homeTeam={game.homeTeam}
-                    awayTeam={game.awayTeam}
-                    homeXg={h?.xgAvg}
-                    awayXg={a?.xgAvg}
-                    homeGoals={h?.goalsScoredAvg}
-                    awayGoals={a?.goalsScoredAvg}
-                    homeXgConceded={h?.xgConcededAvg}
-                    awayXgConceded={a?.xgConcededAvg}
-                  />
-                </div>
-              )}
-              <VotesWidget gameId={game.id} homeTeam={game.homeTeam} awayTeam={game.awayTeam} />
-              <ManagersWidget gameId={game.id} />
-              {(isLive || isFinished) && (
-                <BestPlayersWidget gameId={game.id} homeTeam={game.homeTeam} awayTeam={game.awayTeam} />
-              )}
-            </Section>
-
-            {/* Probabilidades */}
-            <Section title="Probabilidades" defaultOpen={false}>
-              <p className="text-xs text-muted-foreground uppercase tracking-widest mb-3">Distribuição Poisson</p>
-              <PoissonHeatmap
-                homeGoals={homeGoals}
-                awayGoals={awayGoals}
-                homeTeam={game.homeTeam}
-                awayTeam={game.awayTeam}
-              />
-              <div className="grid grid-cols-3 gap-2 mt-4">
-                {[
-                  { label: game.homeTeam, value: poissonWin.home, color: 'text-sky-400' },
-                  { label: 'Empate', value: poissonWin.draw, color: 'text-muted-foreground' },
-                  { label: game.awayTeam, value: poissonWin.away, color: 'text-orange-400' },
-                ].map(({ label, value, color }) => (
-                  <div key={label} className="text-center py-3 bg-white/5 rounded-xl">
-                    <p className={cn('text-lg font-bold font-mono tabular-nums', color)}>
-                      {(value * 100).toFixed(0)}%
-                    </p>
-                    <p className="text-xs text-muted-foreground mt-0.5 truncate px-1">{label}</p>
-                  </div>
-                ))}
-              </div>
-            </Section>
-
-            {/* H2H */}
-            <Section title="H2H" defaultOpen={false}>
-              <H2HSection gameId={game.id} homeTeam={game.homeTeam} awayTeam={game.awayTeam} />
-            </Section>
-
-            {/* Ao Vivo */}
-            {isLive && (
-              <Section title="Visão Geral" defaultOpen={true}>
-                <MatchOverview
-                  gameId={game.id}
-                  homeTeam={game.homeTeam}
-                  awayTeam={game.awayTeam}
-                  homeTeamId={game.homeTeamId}
-                  awayTeamId={game.awayTeamId}
-                />
-              </Section>
-            )}
-
-            {/* Narração */}
-            {(isLive || isFinished) && (
-              <Section title="Narração" defaultOpen={false}>
-                <CommentarySection gameId={game.id} />
-              </Section>
-            )}
-
-            {/* Destaques */}
-            {(isLive || isFinished) && (
-              <Section title="Destaques" defaultOpen={false}>
-                <HighlightsSection gameId={game.id} />
-              </Section>
-            )}
-
+          {/* ── Left column: tabbed content ─────────────────────────── */}
+          <div className="flex-1 min-w-0">
+            <GameTabs
+              isLive={isLive}
+              isFinished={isFinished}
+              game={game}
+              h={h}
+              a={a}
+              report={report}
+              signals={signals}
+              news={news}
+              homeGoals={homeGoals}
+              awayGoals={awayGoals}
+              poissonWin={poissonWin}
+            />
           </div>
 
-          {/* ── Right sidebar: signals + odds + squad ───────────────── */}
-          <div className="w-80 shrink-0 space-y-2 hidden lg:block">
-
-            {/* Sinais */}
-            <Section title="Sinais" defaultOpen={true}>
-              {!signals || signals.length === 0 ? (
-                <div className="flex flex-col items-center justify-center py-6 text-center gap-2">
-                  <p className="text-2xl opacity-20">◈</p>
-                  <p className="text-sm text-muted-foreground">Nenhum sinal gerado</p>
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  {signals.map(s => (
-                    <div key={s.id} className="space-y-2 pb-3 border-b border-border/40 last:border-0 last:pb-0">
-                      <div className="flex items-center justify-between">
-                        <MarketBadge market={s.market} size="md" />
-                        <span className="text-xl font-bold font-mono tabular-nums">{Math.round(s.probability * 100)}%</span>
-                      </div>
-                      <ConfidenceMeter value={s.confidence} />
-                      {s.ev != null && (
-                        <p className="text-xs font-mono">
-                          EV: <span className={s.ev >= 0 ? 'text-emerald-400' : 'text-red-400'}>
-                            {s.ev >= 0 ? '+' : ''}{s.ev.toFixed(1)}%
-                          </span>
-                        </p>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </Section>
-
-            {/* Odds */}
-            <Section title="Odds" defaultOpen={true}>
+          {/* ── Right sidebar: sticky action zone ───────────────────── */}
+          <div className="w-72 shrink-0 space-y-2 hidden lg:block sticky top-[72px]">
+            <SignalsPanel signals={signals} />
+            <Section title="Odds" type="analysis" defaultOpen={true}>
               <OddsSection gameId={game.id} />
             </Section>
-
-            {/* Elenco */}
-            <Section title="Elenco" defaultOpen={false}>
-              <SquadSection gameId={game.id} homeTeam={game.homeTeam} awayTeam={game.awayTeam} />
-            </Section>
-
-            {/* Notícias */}
-            {news.length > 0 && (
-              <Section title={`Notícias (${news.length})`} defaultOpen={true}>
-                <ul className="space-y-3">
-                  {news.map((item, i) => (
-                    <li key={i} className="flex gap-2.5 items-start">
-                      <div className="shrink-0 w-1 h-1 rounded-full bg-violet-400/50 mt-2" />
-                      <div className="min-w-0">
-                        {item.url ? (
-                          <a href={item.url} target="_blank" rel="noopener noreferrer"
-                            className="text-sm text-foreground/80 hover:text-foreground leading-snug line-clamp-2 transition-colors">
-                            {item.title}
-                          </a>
-                        ) : (
-                          <p className="text-sm text-foreground/80 leading-snug line-clamp-2">{item.title}</p>
-                        )}
-                        <div className="flex items-center gap-2 mt-0.5">
-                          <span className="text-xs text-muted-foreground/60">{item.source}</span>
-                          {item.publishedAt && (
-                            <>
-                              <span className="text-muted-foreground/30">·</span>
-                              <span className="text-xs text-muted-foreground/40">
-                                {new Date(item.publishedAt).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}
-                              </span>
-                            </>
-                          )}
-                        </div>
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              </Section>
-            )}
-
-          </div>
-
-          {/* ── Mobile-only sections (visible below lg) ─────────────── */}
-          <div className="lg:hidden w-full space-y-2" style={{ display: 'contents' }}>
           </div>
 
         </div>
+      </div>
+    </div>
+  )
+}
 
-        {/* Mobile-only: Sinais + Odds + Elenco below main content */}
-        <div className="lg:hidden space-y-2 mt-2">
-          <Section title="Sinais" defaultOpen={true}>
-            {!signals || signals.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-6 text-center gap-2">
-                <p className="text-2xl opacity-20">◈</p>
-                <p className="text-sm text-muted-foreground">Nenhum sinal gerado</p>
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {signals.map(s => (
-                  <div key={s.id} className="space-y-2 pb-3 border-b border-border/40 last:border-0 last:pb-0">
-                    <div className="flex items-center justify-between">
-                      <MarketBadge market={s.market} size="md" />
-                      <span className="text-xl font-bold font-mono tabular-nums">{Math.round(s.probability * 100)}%</span>
-                    </div>
-                    <ConfidenceMeter value={s.confidence} />
-                    {s.ev != null && (
-                      <p className="text-xs font-mono">
-                        EV: <span className={s.ev >= 0 ? 'text-emerald-400' : 'text-red-400'}>
-                          {s.ev >= 0 ? '+' : ''}{s.ev.toFixed(1)}%
-                        </span>
-                      </p>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-          </Section>
-          <Section title="Odds" defaultOpen={false}>
-            <OddsSection gameId={game.id} />
-          </Section>
-          <Section title="Elenco" defaultOpen={false}>
-            <SquadSection gameId={game.id} homeTeam={game.homeTeam} awayTeam={game.awayTeam} />
-          </Section>
-          {news.length > 0 && (
-            <Section title={`Notícias (${news.length})`} defaultOpen={true}>
-              <ul className="space-y-3">
-                {news.map((item, i) => (
-                  <li key={i} className="flex gap-2.5 items-start">
-                    <div className="shrink-0 w-1 h-1 rounded-full bg-violet-400/50 mt-2" />
-                    <div className="min-w-0">
-                      {item.url ? (
-                        <a href={item.url} target="_blank" rel="noopener noreferrer"
-                          className="text-sm text-foreground/80 hover:text-foreground leading-snug line-clamp-2 transition-colors">
-                          {item.title}
-                        </a>
-                      ) : (
-                        <p className="text-sm text-foreground/80 leading-snug line-clamp-2">{item.title}</p>
-                      )}
-                      <div className="flex items-center gap-2 mt-0.5">
-                        <span className="text-xs text-muted-foreground/60">{item.source}</span>
-                        {item.publishedAt && (
-                          <>
-                            <span className="text-muted-foreground/30">·</span>
-                            <span className="text-xs text-muted-foreground/40">
-                              {new Date(item.publishedAt).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}
-                            </span>
-                          </>
-                        )}
-                      </div>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            </Section>
+// ── Signals panel ─────────────────────────────────────────────────────────────
+
+type Signal = NonNullable<NonNullable<ReturnType<typeof useAnalysis>['data']>['signals']>[number]
+
+function SignalsPanel({ signals }: { signals: Signal[] | null | undefined }) {
+  if (!signals || signals.length === 0) {
+    return (
+      <div className="glass-analysis rounded-[20px] px-4 py-5 flex flex-col items-center gap-2 text-center">
+        <p className="text-2xl opacity-10">◈</p>
+        <p className="text-xs text-muted-foreground">Nenhum sinal gerado</p>
+      </div>
+    )
+  }
+  return (
+    <div className="glass-analysis rounded-[20px] px-4 py-4 space-y-3">
+      <p className="text-xs text-muted-foreground/60 uppercase tracking-widest font-medium">Sinais</p>
+      {signals.map(s => (
+        <div key={s.id} className="space-y-2 pb-3 border-b border-white/[0.04] last:border-0 last:pb-0">
+          <div className="flex items-center justify-between">
+            <MarketBadge market={s.market} size="md" />
+            <span className="text-xl font-bold font-mono tabular-nums">{Math.round(s.probability * 100)}%</span>
+          </div>
+          <ConfidenceMeter value={s.confidence} />
+          {s.ev != null && (
+            <p className="text-xs font-mono">
+              EV: <span className={s.ev >= 0 ? 'text-emerald-400' : 'text-red-400'}>
+                {s.ev >= 0 ? '+' : ''}{s.ev.toFixed(1)}%
+              </span>
+            </p>
           )}
         </div>
+      ))}
+    </div>
+  )
+}
 
+// ── News list ─────────────────────────────────────────────────────────────────
+
+function NewsList({ news }: { news: Array<{ title: string; url?: string; source?: string; publishedAt?: string }> }) {
+  if (!news.length) return null
+  return (
+    <ul className="space-y-3">
+      {news.map((item, i) => (
+        <li key={i} className="flex gap-2.5 items-start">
+          <div className="shrink-0 w-1 h-1 rounded-full bg-violet-400/50 mt-2" />
+          <div className="min-w-0">
+            {item.url ? (
+              <a href={item.url} target="_blank" rel="noopener noreferrer"
+                className="text-sm text-foreground/80 hover:text-foreground leading-snug line-clamp-2 transition-colors">
+                {item.title}
+              </a>
+            ) : (
+              <p className="text-sm text-foreground/80 leading-snug line-clamp-2">{item.title}</p>
+            )}
+            <div className="flex items-center gap-2 mt-0.5">
+              <span className="text-xs text-muted-foreground/60">{item.source}</span>
+              {item.publishedAt && (
+                <>
+                  <span className="text-muted-foreground/30">·</span>
+                  <span className="text-xs text-muted-foreground/40">
+                    {new Date(item.publishedAt).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}
+                  </span>
+                </>
+              )}
+            </div>
+          </div>
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+// ── Game tabs ─────────────────────────────────────────────────────────────────
+
+type GameTabsProps = {
+  isLive: boolean
+  isFinished: boolean
+  game: NonNullable<ReturnType<typeof useAnalysis>['data']>['game']
+  h: NonNullable<ReturnType<typeof useAnalysis>['data']>['homeStats']
+  a: NonNullable<ReturnType<typeof useAnalysis>['data']>['awayStats']
+  report: string | null | undefined
+  signals: NonNullable<ReturnType<typeof useAnalysis>['data']>['signals']
+  news: Array<{ title: string; url?: string; source?: string; publishedAt?: string }>
+  homeGoals: number
+  awayGoals: number
+  poissonWin: { home: number; draw: number; away: number }
+}
+
+function GameTabs({ isLive, isFinished, game, h, a, report, signals, news, homeGoals, awayGoals, poissonWin }: GameTabsProps) {
+  const tabs = [
+    ...(isLive ? [{ id: 'live', label: 'Ao Vivo', isLive: true }] : []),
+    { id: 'intelligence', label: 'Inteligência', isLive: false },
+    { id: 'stats', label: 'Stats', isLive: false },
+    { id: 'lineups', label: 'Escalação', isLive: false },
+  ]
+
+  const [activeTab, setActiveTab] = useState<string>(isLive ? 'live' : 'intelligence')
+
+  return (
+    <div className="flex flex-col gap-4">
+      {/* Tab bar */}
+      <div className="flex p-1 gap-0.5 bg-white/[0.025] backdrop-blur-xl border border-white/[0.05] rounded-2xl w-fit overflow-x-auto no-scrollbar">
+        {tabs.map((tab) => {
+          const isActive = activeTab === tab.id
+          return (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              className={cn(
+                'relative flex items-center gap-2 px-4 py-2 text-xs font-medium rounded-xl transition-colors duration-200 outline-none whitespace-nowrap z-10',
+                isActive ? 'text-foreground' : 'text-foreground/40 hover:text-foreground/70 hover:bg-white/[0.02]'
+              )}
+            >
+              {isActive && (
+                <motion.div
+                  layoutId="game-tab-pill"
+                  className={cn(
+                    'absolute inset-0 rounded-xl -z-10',
+                    'bg-white/[0.06] border border-white/[0.10]',
+                    'shadow-[inset_0_1px_0_0_rgba(255,255,255,0.12)]',
+                    tab.isLive && 'border-emerald-500/20 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.12),0_0_16px_rgba(16,185,129,0.08)]'
+                  )}
+                  transition={{ type: 'spring', bounce: 0.18, duration: 0.55 }}
+                />
+              )}
+              {tab.isLive && (
+                <span className="relative flex h-1.5 w-1.5">
+                  <span className={cn('absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75', isActive && 'animate-ping')} />
+                  <span className={cn('relative inline-flex rounded-full h-1.5 w-1.5', isActive ? 'bg-emerald-400' : 'bg-emerald-600/50')} />
+                </span>
+              )}
+              {tab.label}
+            </button>
+          )
+        })}
       </div>
+
+      {/* Tab content */}
+      <AnimatePresence mode="wait">
+        <motion.div
+          key={activeTab}
+          initial={{ opacity: 0, y: 10, filter: 'blur(3px)' }}
+          animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
+          exit={{ opacity: 0, y: -10, filter: 'blur(3px)' }}
+          transition={{ duration: 0.28, ease: [0.16, 1, 0.3, 1] }}
+        >
+          {activeTab === 'live' && (
+            <div className="space-y-3">
+              {/* Coach — aurora glow wrapper */}
+              <div className="relative">
+                <div className="absolute -inset-6 bg-violet-600/[0.08] blur-[60px] rounded-full pointer-events-none" />
+                <CoachCard gameId={game.id} isLive={true} />
+              </div>
+
+              <div className="glass-live rounded-[20px] overflow-hidden">
+                <div className="px-4 py-4">
+                  <MatchOverview
+                    gameId={game.id}
+                    homeTeam={game.homeTeam}
+                    awayTeam={game.awayTeam}
+                    homeTeamId={game.homeTeamId}
+                    awayTeamId={game.awayTeamId}
+                  />
+                </div>
+              </div>
+
+              <div className="glass-live rounded-[20px] overflow-hidden">
+                <div className="px-4 py-4">
+                  <AttackDonut
+                    gameId={game.id}
+                    homeTeam={game.homeTeam}
+                    awayTeam={game.awayTeam}
+                  />
+                </div>
+              </div>
+
+              {(isLive || isFinished) && (
+                <Section title="Narração" type="live" defaultOpen={false}>
+                  <CommentarySection gameId={game.id} />
+                </Section>
+              )}
+              {(isLive || isFinished) && (
+                <Section title="Destaques" type="live" defaultOpen={false}>
+                  <HighlightsSection gameId={game.id} />
+                </Section>
+              )}
+
+              {/* Mobile-only signals + odds */}
+              <div className="lg:hidden space-y-2 pt-1">
+                <SignalsPanel signals={signals} />
+                <Section title="Odds" type="analysis" defaultOpen={true}>
+                  <OddsSection gameId={game.id} />
+                </Section>
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'intelligence' && (
+            <div className="space-y-3">
+              <div className="glass-analysis rounded-[20px] px-4 py-5">
+                {report ? (
+                  (() => {
+                    const parsed = parseReport(report)
+                    return parsed ? (
+                      <AnalysisReportView report={parsed} />
+                    ) : (
+                      <ul className="space-y-1.5">
+                        {report.split('\n').filter(Boolean).map((line, i) => (
+                          <li key={i} className="flex gap-2 text-sm text-foreground/70 leading-relaxed">
+                            <span className="text-violet-400/60 shrink-0 mt-0.5">·</span>
+                            <span>{line.replace(/^[-•·#]\s*/, '')}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    )
+                  })()
+                ) : (
+                  <div className="space-y-2">
+                    {[60, 85, 70, 90, 50].map((w, i) => (
+                      <Skeleton key={i} className="h-3 rounded" style={{ width: `${w}%` }} />
+                    ))}
+                    <p className="text-xs text-muted-foreground/50 pt-1">Aguardando análise...</p>
+                  </div>
+                )}
+              </div>
+
+              <div className="glass-analysis rounded-[20px] px-4 py-5 space-y-4">
+                <p className="text-xs text-muted-foreground/60 uppercase tracking-widest font-medium">Distribuição Poisson</p>
+                <PoissonHeatmap
+                  homeGoals={homeGoals}
+                  awayGoals={awayGoals}
+                  homeTeam={game.homeTeam}
+                  awayTeam={game.awayTeam}
+                />
+                <div className="grid grid-cols-3 gap-2">
+                  {[
+                    { label: game.homeTeam, value: poissonWin.home, color: 'text-sky-400' },
+                    { label: 'Empate', value: poissonWin.draw, color: 'text-muted-foreground' },
+                    { label: game.awayTeam, value: poissonWin.away, color: 'text-orange-400' },
+                  ].map(({ label, value, color }) => (
+                    <div key={label} className="text-center py-3 bg-white/[0.03] rounded-xl">
+                      <p className={cn('text-lg font-bold font-mono tabular-nums', color)}>
+                        {(value * 100).toFixed(0)}%
+                      </p>
+                      <p className="text-xs text-muted-foreground mt-0.5 truncate px-1">{label}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Mobile-only signals + odds */}
+              <div className="lg:hidden space-y-2 pt-1">
+                <SignalsPanel signals={signals} />
+                <Section title="Odds" type="analysis" defaultOpen={false}>
+                  <OddsSection gameId={game.id} />
+                </Section>
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'stats' && (
+            <div className="space-y-3">
+              <div className="glass-analysis rounded-[20px] px-4 py-5 space-y-1">
+                <div className="flex justify-between text-xs font-semibold mb-3">
+                  <span className="text-sky-400">{game.homeTeam}</span>
+                  <span className="text-orange-400">{game.awayTeam}</span>
+                </div>
+                <StatRow label="xG marc." home={h?.xgAvg} away={a?.xgAvg} />
+                <StatRow label="xG sofr." home={h?.xgConcededAvg} away={a?.xgConcededAvg} higherIsBetter={false} />
+                <StatRow label="Gols marc." home={h?.goalsScoredAvg} away={a?.goalsScoredAvg} />
+                <StatRow label="Gols sofr." home={h?.goalsConcededAvg} away={a?.goalsConcededAvg} higherIsBetter={false} />
+                <StatRow label="Over 2.5 %" home={h?.over25Pct} away={a?.over25Pct} format="pct" />
+                {h?.possessionAvg != null && <StatRow label="Posse %" home={h.possessionAvg} away={a?.possessionAvg} format="pct" />}
+                {(h?.formLast5 || a?.formLast5) && (
+                  <div className="mt-3 pt-3 border-t border-white/[0.04]">
+                    <p className="text-xs text-muted-foreground/60 uppercase tracking-widest mb-2">Forma recente</p>
+                    <div className="flex items-center justify-between">
+                      <FormPills form={h?.formLast5} />
+                      <span className="text-xs text-muted-foreground">vs</span>
+                      <FormPills form={a?.formLast5} />
+                    </div>
+                  </div>
+                )}
+                {(h || a) && (
+                  <div className="pt-3">
+                    <XGChart
+                      homeTeam={game.homeTeam}
+                      awayTeam={game.awayTeam}
+                      homeXg={h?.xgAvg}
+                      awayXg={a?.xgAvg}
+                      homeGoals={h?.goalsScoredAvg}
+                      awayGoals={a?.goalsScoredAvg}
+                      homeXgConceded={h?.xgConcededAvg}
+                      awayXgConceded={a?.xgConcededAvg}
+                    />
+                  </div>
+                )}
+                <VotesWidget gameId={game.id} homeTeam={game.homeTeam} awayTeam={game.awayTeam} />
+                <ManagersWidget gameId={game.id} />
+                {(isLive || isFinished) && (
+                  <BestPlayersWidget gameId={game.id} homeTeam={game.homeTeam} awayTeam={game.awayTeam} />
+                )}
+              </div>
+
+              <div className="glass-analysis rounded-[20px] px-4 py-5">
+                <p className="text-xs text-muted-foreground/60 uppercase tracking-widest mb-3 font-medium">H2H</p>
+                <H2HSection gameId={game.id} homeTeam={game.homeTeam} awayTeam={game.awayTeam} />
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'lineups' && (
+            <div className="space-y-3">
+              <div className="glass-analysis rounded-[20px] px-4 py-5">
+                <p className="text-xs text-muted-foreground/60 uppercase tracking-widest mb-3 font-medium">Elenco</p>
+                <SquadSection gameId={game.id} homeTeam={game.homeTeam} awayTeam={game.awayTeam} />
+              </div>
+              {news.length > 0 && (
+                <div className="glass-analysis rounded-[20px] px-4 py-5">
+                  <p className="text-xs text-muted-foreground/60 uppercase tracking-widest mb-3 font-medium">
+                    Notícias ({news.length})
+                  </p>
+                  <NewsList news={news} />
+                </div>
+              )}
+            </div>
+          )}
+        </motion.div>
+      </AnimatePresence>
     </div>
   )
 }

@@ -142,3 +142,32 @@ export interface CoachSuggestionsResponse {
 
 export const fetchCoachSuggestions = () =>
   get<CoachSuggestionsResponse>('/coach/suggestions')
+
+export interface CoachDaySummary {
+  date: string
+  total: number
+  won: number
+  lost: number
+  void: number
+  pending: number
+  accuracy: number | null
+}
+
+export interface CoachHistoryItem {
+  id: number
+  date: string
+  gameId: string
+  homeTeam: string
+  awayTeam: string
+  league: string
+  market: string
+  rationale: string
+  outcome: 'won' | 'lost' | 'void' | null
+  evaluatedAt: string | null
+}
+
+export const fetchCoachHistory = (months = 3) =>
+  get<CoachDaySummary[]>('/coach/history', { months })
+
+export const fetchCoachHistoryByDate = (date: string) =>
+  get<CoachHistoryItem[]>(`/coach/history/${date}`)

@@ -3,12 +3,24 @@ import { getGameById, getGamesToday, getGameMeta } from '../../db/queries/games'
 import { getNewsByGameId, getSignalsByGameId } from '../../db/queries/signals'
 import { getCoachSuggestion, getCoachMetrics } from '../../services/coach'
 import { getCoachSuggestions } from '../../services/coachSuggestions'
-import { getAttackStats } from '../../services/attackTracker'
+import { getCoachHistorySummary, getCoachHistoryByDate } from '../../db/queries/coachHistory'
+import { runCoachBackfill } from '../../services/coachBackfill'
+import { getAttackStats, pollAttackStats } from '../../services/attackTracker'
 import axios from 'axios'
 
 const router = Router()
 
 const SCRAPER_URL = process.env.SCRAPER_URL ?? 'http://localhost:8001'
+
+function estimateGameMinute(status?: string | null, kickoffAt?: string | null): number {
+  if (!status) return 0
+  if (status === 'halftime') return 45
+  if (status === 'finished' || status === 'completed') return 90
+  if ((status === 'inprogress' || status === 'live' || status === 'pause') && kickoffAt) {
+    return Math.min(Math.floor((Date.now() - new Date(kickoffAt).getTime()) / 60000), 90)
+  }
+  return 0
+}
 
 // In-memory image cache: teamId → { data, contentType, cachedAt }
 const imageCache = new Map<number, { data: Buffer; contentType: string; cachedAt: number }>()
@@ -52,6 +64,46 @@ router.get('/coach/suggestions', async (_req: Request, res: Response, next: Next
   try {
     const result = await getCoachSuggestions()
     res.json(result)
+  } catch (err) {
+    next(err)
+  }
+})
+
+// POST /games/coach/history/backfill  body: { from: "YYYY-MM-DD", to: "YYYY-MM-DD" }
+router.post('/coach/history/backfill', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const from = String(req.body?.from ?? '2026-04-09')
+    const to   = String(req.body?.to   ?? new Date(Date.now() - 86400000).toISOString().slice(0, 10))
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) {
+      res.status(400).json({ error: 'Invalid date format. Use YYYY-MM-DD.' })
+      return
+    }
+    const results = await runCoachBackfill(from, to)
+    res.json({ ok: true, results })
+  } catch (err) {
+    next(err)
+  }
+})
+
+// GET /games/coach/history?months=3
+router.get('/coach/history', (_req: Request, res: Response, next: NextFunction): void => {
+  try {
+    const months = Math.min(12, Math.max(1, parseInt(String(_req.query.months ?? '3'), 10) || 3))
+    res.json(getCoachHistorySummary(months))
+  } catch (err) {
+    next(err)
+  }
+})
+
+// GET /games/coach/history/:date
+router.get('/coach/history/:date', (_req: Request, res: Response, next: NextFunction): void => {
+  try {
+    const date = String(_req.params.date)
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      res.status(400).json({ error: 'Invalid date format. Use YYYY-MM-DD.' })
+      return
+    }
+    res.json(getCoachHistoryByDate(date))
   } catch (err) {
     next(err)
   }
@@ -151,12 +203,19 @@ router.get('/:id/graph', (req, res, next) =>
   proxyMatch(req, res, next, 'graph', { points: [] }))
 
 // GET /games/:id/attack-stats
-router.get('/:id/attack-stats', (req: Request, res: Response, next: NextFunction): void => {
+router.get('/:id/attack-stats', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const gameId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id
     const meta = getGameMeta(gameId)
     if (!meta?.exchangeEventId) { res.json(null); return }
-    const stats = getAttackStats(meta.exchangeEventId)
+    // Poll on-demand if no cached data yet
+    let stats = getAttackStats(meta.exchangeEventId)
+    if (!stats) {
+      const game = getGameById(gameId)
+      const gameMinute = estimateGameMinute(game?.status, game?.kickoffAt)
+      await pollAttackStats(meta.exchangeEventId, gameMinute)
+      stats = getAttackStats(meta.exchangeEventId)
+    }
     res.json(stats)
   } catch (err) { next(err) }
 })

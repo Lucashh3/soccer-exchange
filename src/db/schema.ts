@@ -144,6 +144,67 @@ export function initDb(): Database.Database {
     );
   `)
 
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS coach_suggestion_history (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      date TEXT NOT NULL,
+      game_id TEXT NOT NULL,
+      home_team TEXT NOT NULL,
+      away_team TEXT NOT NULL,
+      league TEXT NOT NULL,
+      market TEXT NOT NULL,
+      rationale TEXT NOT NULL,
+      outcome TEXT CHECK(outcome IN ('won', 'lost', 'void')) DEFAULT NULL,
+      evaluated_at TEXT DEFAULT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(date, game_id, market)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_coach_history_date ON coach_suggestion_history(date);
+    CREATE INDEX IF NOT EXISTS idx_coach_history_game ON coach_suggestion_history(game_id);
+  `)
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS live_snapshots (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      game_id TEXT NOT NULL REFERENCES games(id) ON DELETE CASCADE,
+      minute INTEGER NOT NULL,
+      home_goals INTEGER NOT NULL DEFAULT 0,
+      away_goals INTEGER NOT NULL DEFAULT 0,
+      home_attacks_per_min REAL,
+      home_dangerous_per_min REAL,
+      home_last5min REAL,
+      home_last10min REAL,
+      home_trend TEXT,
+      away_attacks_per_min REAL,
+      away_dangerous_per_min REAL,
+      away_last5min REAL,
+      away_last10min REAL,
+      away_trend TEXT,
+      prior_home_win REAL,
+      prior_draw REAL,
+      prior_away_win REAL,
+      prior_lambda_home REAL,
+      prior_lambda_away REAL,
+      final_result TEXT CHECK(final_result IN ('H', 'D', 'A')),
+      captured_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_live_snapshots_game ON live_snapshots(game_id);
+    CREATE INDEX IF NOT EXISTS idx_live_snapshots_unlabeled ON live_snapshots(final_result) WHERE final_result IS NULL;
+  `)
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS users (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      email TEXT NOT NULL UNIQUE,
+      password_hash TEXT NOT NULL,
+      role TEXT NOT NULL DEFAULT 'user' CHECK(role IN ('user', 'admin')),
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+  `)
+
   // Migrations for existing databases
   const cols = (db.prepare(`PRAGMA table_info(games)`).all() as { name: string }[]).map(r => r.name)
   if (!cols.includes('home_team_id')) db.exec(`ALTER TABLE games ADD COLUMN home_team_id INTEGER`)

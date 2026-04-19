@@ -1,3 +1,4 @@
+import { generateReport as openrouterGenerate } from './openrouter'
 import { generateReport as openaiGenerate } from './openai'
 import { generateReport as deepseekGenerate } from './deepseek'
 import { generateReport as claudeGenerate } from './claude'
@@ -15,7 +16,17 @@ function isQuotaError(err: unknown): boolean {
 }
 
 export async function generateReport(prompt: string): Promise<string> {
-  // 1. OpenAI
+  // 1. OpenRouter — GPT-OSS 120B
+  if (process.env.OPENROUTER_API_KEY) {
+    try {
+      const result = await openrouterGenerate(prompt)
+      if (result) return result
+    } catch (err) {
+      console.error('[llm] OpenRouter error:', err instanceof Error ? err.message : err)
+    }
+  }
+
+  // 2. OpenAI
   if (process.env.OPENAI_API_KEY) {
     try {
       const result = await openaiGenerate(prompt)
@@ -29,7 +40,7 @@ export async function generateReport(prompt: string): Promise<string> {
     }
   }
 
-  // 2. DeepSeek
+  // 3. DeepSeek
   if (process.env.DEEPSEEK_API_KEY) {
     try {
       console.log('[llm] Using DeepSeek')
@@ -39,7 +50,7 @@ export async function generateReport(prompt: string): Promise<string> {
     }
   }
 
-  // 3. Claude (fallback final)
+  // 4. Claude (fallback final)
   if (process.env.ANTHROPIC_API_KEY) {
     try {
       console.log('[llm] Using Claude as fallback')

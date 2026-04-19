@@ -41,6 +41,33 @@ LEAGUE_IDS: dict[int, dict] = {
 
     # EUA
     242:   {"name": "MLS",                 "country": "USA"},
+
+    # Turquia
+    52:    {"name": "Süper Lig",           "country": "Turkey"},
+
+    # Argentina
+    155:   {"name": "Liga Profesional",    "country": "Argentina"},
+
+    # Dinamarca
+    39:    {"name": "Danish Superliga",    "country": "Denmark"},
+
+    # Suécia
+    40:    {"name": "Allsvenskan",         "country": "Sweden"},
+
+    # Polônia
+    202:   {"name": "Ekstraklasa",         "country": "Poland"},
+
+    # Áustria
+    45:    {"name": "Austrian Bundesliga", "country": "Austria"},
+
+    # Romênia
+    152:   {"name": "SuperLiga",           "country": "Romania"},
+
+    # Croácia
+    170:   {"name": "HNL",                "country": "Croatia"},
+
+    # Rússia
+    203:   {"name": "Russian Premier League", "country": "Russia"},
 }
 
 LEAGUE_ID_SET = set(LEAGUE_IDS.keys())

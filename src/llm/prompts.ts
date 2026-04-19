@@ -27,7 +27,6 @@ ${news.map(n => `- ${n.title} (${n.source})`).join('\n')}
 - Chutes no gol por jogo: ${formatStat(homeStats?.shotsOnTargetAvg)}
 - Grandes chances criadas: ${formatStat(homeStats?.bigChancesCreatedAvg)}
 - Grandes chances sofridas: ${formatStat(homeStats?.bigChancesConcededAvg)}
-- Taxa BTTS: ${homeStats?.bttsPct !== undefined ? formatPct(homeStats.bttsPct) : 'N/A'}
 - Taxa Over 2.5: ${homeStats?.over25Pct !== undefined ? formatPct(homeStats.over25Pct) : 'N/A'}
 - Média Escanteios: ${formatStat(homeStats?.cornersAvg)}
 - Média Cartões: ${formatStat(homeStats?.cardsAvg)}
@@ -47,7 +46,6 @@ ${news.map(n => `- ${n.title} (${n.source})`).join('\n')}
 - Chutes no gol por jogo: ${formatStat(awayStats?.shotsOnTargetAvg)}
 - Grandes chances criadas: ${formatStat(awayStats?.bigChancesCreatedAvg)}
 - Grandes chances sofridas: ${formatStat(awayStats?.bigChancesConcededAvg)}
-- Taxa BTTS: ${awayStats?.bttsPct !== undefined ? formatPct(awayStats.bttsPct) : 'N/A'}
 - Taxa Over 2.5: ${awayStats?.over25Pct !== undefined ? formatPct(awayStats.over25Pct) : 'N/A'}
 - Média Escanteios: ${formatStat(awayStats?.cornersAvg)}
 - Média Cartões: ${formatStat(awayStats?.cardsAvg)}
@@ -69,7 +67,6 @@ ${newsSection}
 - Vitória Casa: ${formatPct(probabilities.homeWin)}
 - Empate: ${formatPct(probabilities.draw)}
 - Vitória Fora: ${formatPct(probabilities.awayWin)}
-- Ambos Marcam (BTTS): ${formatPct(probabilities.btts)}
 - Over 2.5 Gols: ${formatPct(probabilities.over25)}
 - Under 2.5 Gols: ${formatPct(probabilities.under25)}
 ${homeStatsBlock}
@@ -79,7 +76,7 @@ ${awayStatsBlock}
 {
   "signal": {
     "status": "ENTRADA_VALIDADA" | "ALERTA_DE_RISCO" | "NO_BET",
-    "market": "1x2" | "BTTS" | "Over2.5" | "Under2.5",
+    "market": "1x2" | "Over2.5" | "Under2.5",
     "direction": "BACK_HOME" | "BACK_AWAY" | "LAY_HOME" | "LAY_AWAY" | "NONE",
     "probability": <número 0-100>,
     "confidence": <número 0-100>

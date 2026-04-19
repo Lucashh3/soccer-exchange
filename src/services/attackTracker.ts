@@ -12,9 +12,10 @@ const STAT_DANGEROUS = 32
 const MAX_SNAPSHOTS  = 120  // ~2h a 1 snapshot/min
 
 interface AttackSnapshot {
-  timestamp: number
-  attacks:   number
-  dangerous: number
+  timestamp:  number
+  attacks:    number
+  dangerous:  number
+  gameMinute: number   // minuto do jogo (0 = desconhecido)
 }
 
 interface SideSnapshots {
@@ -26,10 +27,10 @@ const store = new Map<string, SideSnapshots>()
 
 export interface TeamAttackRates {
   total:       number
-  perMin:      number
-  last5min:    number
+  perMin:      number | null
+  last5min:    number | null
   last5trend:  'up' | 'down' | 'stable'
-  last10min:   number
+  last10min:   number | null
   last10trend: 'up' | 'down' | 'stable'
 }
 
@@ -57,36 +58,77 @@ function closestSnapshot(snapshots: AttackSnapshot[], targetTs: number): AttackS
   )
 }
 
+const MIN_5  = 4.5 * 60_000   // 4.5 min de histórico mínimo para janela de 5min
+const MIN_10 = 9.0 * 60_000   // 9 min de histórico mínimo para janela de 10min
+
 function calcRates(snapshots: AttackSnapshot[], field: 'attacks' | 'dangerous'): TeamAttackRates {
   if (snapshots.length === 0) {
-    return { total: 0, perMin: 0, last5min: 0, last5trend: 'stable', last10min: 0, last10trend: 'stable' }
+    return { total: 0, perMin: null, last5min: null, last5trend: 'stable', last10min: null, last10trend: 'stable' }
   }
 
-  const latest  = snapshots[snapshots.length - 1]
-  const oldest  = snapshots[0]
-  const total   = latest[field]
-  const ageMin  = Math.max((latest.timestamp - oldest.timestamp) / 60000, 1)
-  const perMin  = parseFloat((total / ageMin).toFixed(2))
+  const latest = snapshots[snapshots.length - 1]
+  const oldest = snapshots[0]
+  const total  = latest[field]
+  const span   = latest.timestamp - oldest.timestamp  // ms de histórico disponível
 
-  const snap5      = closestSnapshot(snapshots, latest.timestamp - 5 * 60_000)
-  const elapsed5   = Math.max((latest.timestamp - snap5.timestamp) / 60000, 1)
-  const last5min   = parseFloat((Math.max(latest[field] - snap5[field], 0) / elapsed5).toFixed(2))
+  // perMin: taxa de ataques por minuto
+  // Prioridade: 1) incremento no span observado  2) última janela ativa  3) total/minuto do jogo
+  let perMin: number | null = null
+  if (span >= 60_000 && latest[field] - oldest[field] > 0) {
+    perMin = parseFloat(((latest[field] - oldest[field]) / (span / 60000)).toFixed(2))
+  }
+  if (!perMin) {
+    // Busca última janela ativa (até 10 min atrás) com incremento real
+    const tenMinAgo = latest.timestamp - 10 * 60_000
+    for (let i = snapshots.length - 1; i >= 1; i--) {
+      if (snapshots[i - 1].timestamp < tenMinAgo) break
+      const dt = (snapshots[i].timestamp - snapshots[i - 1].timestamp) / 60000
+      const inc = snapshots[i][field] - snapshots[i - 1][field]
+      if (dt > 0 && inc > 0) { perMin = parseFloat((inc / dt).toFixed(2)); break }
+    }
+  }
+  if (!perMin) {
+    // Fallback: total / minuto do jogo (usa o minuto do snapshot mais recente com minuto > 0)
+    for (let i = snapshots.length - 1; i >= 0; i--) {
+      if (snapshots[i].gameMinute > 0 && snapshots[i][field] > 0) {
+        perMin = parseFloat((snapshots[i][field] / snapshots[i].gameMinute).toFixed(2))
+        break
+      }
+    }
+  }
 
-  const snap10     = closestSnapshot(snapshots, latest.timestamp - 10 * 60_000)
-  const elapsed10  = Math.max((latest.timestamp - snap10.timestamp) / 60000, 1)
-  const last10min  = parseFloat((Math.max(latest[field] - snap10[field], 0) / elapsed10).toFixed(2))
+  // Janela 5 min
+  let last5min: number | null = null
+  if (span >= MIN_5) {
+    const snap5    = closestSnapshot(snapshots, latest.timestamp - 5 * 60_000)
+    const elapsed5 = (latest.timestamp - snap5.timestamp) / 60000
+    if (elapsed5 >= 4) {
+      last5min = parseFloat((Math.max(latest[field] - snap5[field], 0) / elapsed5).toFixed(2))
+    }
+  }
 
+  // Janela 10 min
+  let last10min: number | null = null
+  if (span >= MIN_10) {
+    const snap10    = closestSnapshot(snapshots, latest.timestamp - 10 * 60_000)
+    const elapsed10 = (latest.timestamp - snap10.timestamp) / 60000
+    if (elapsed10 >= 8) {
+      last10min = parseFloat((Math.max(latest[field] - snap10[field], 0) / elapsed10).toFixed(2))
+    }
+  }
+
+  const baseline = perMin ?? 0
   return {
     total,
     perMin,
     last5min,
-    last5trend:  calcTrend(last5min, perMin),
+    last5trend:  last5min != null ? calcTrend(last5min, baseline) : 'stable',
     last10min,
-    last10trend: calcTrend(last10min, perMin),
+    last10trend: last10min != null ? calcTrend(last10min, baseline) : 'stable',
   }
 }
 
-export async function pollAttackStats(exchangeEventId: string): Promise<void> {
+export async function pollAttackStats(exchangeEventId: string, gameMinute = 0): Promise<void> {
   try {
     const { data } = await axios.get<Array<{ statId: number; homeTeamValue: number; awayTeamValue: number }>>(
       `${STATS_API}/${exchangeEventId}/statistics`,
@@ -101,8 +143,8 @@ export async function pollAttackStats(exchangeEventId: string): Promise<void> {
     if (!store.has(exchangeEventId)) store.set(exchangeEventId, { home: [], away: [] })
     const entry = store.get(exchangeEventId)!
 
-    entry.home.push({ timestamp: now, attacks: attacksRow.homeTeamValue, dangerous: dangerousRow.homeTeamValue })
-    entry.away.push({ timestamp: now, attacks: attacksRow.awayTeamValue, dangerous: dangerousRow.awayTeamValue })
+    entry.home.push({ timestamp: now, gameMinute, attacks: attacksRow.homeTeamValue, dangerous: dangerousRow.homeTeamValue })
+    entry.away.push({ timestamp: now, gameMinute, attacks: attacksRow.awayTeamValue, dangerous: dangerousRow.awayTeamValue })
 
     if (entry.home.length > MAX_SNAPSHOTS) entry.home.shift()
     if (entry.away.length > MAX_SNAPSHOTS) entry.away.shift()

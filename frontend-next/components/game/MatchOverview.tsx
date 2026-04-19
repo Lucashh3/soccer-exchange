@@ -4,7 +4,6 @@ import { useEffect, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { fetchGraph } from '@/lib/api'
 import { AttackMomentum } from './AttackMomentum'
-import { CoachCard } from './CoachCard'
 import { TeamLogo } from '@/components/ui/TeamLogo'
 
 interface MatchEvent {
@@ -212,8 +211,6 @@ export function MatchOverview({ gameId, homeTeam, awayTeam, homeTeamId, awayTeam
           }
         />
       )}
-
-      <CoachCard gameId={gameId} isLive={Boolean(isLive)} />
 
       {/* Stats bars */}
       {keyStats.length > 0 && (

@@ -5,10 +5,10 @@ import { useQuery } from '@tanstack/react-query'
 
 interface TeamAttackRates {
   total:       number
-  perMin:      number
-  last5min:    number
+  perMin:      number | null
+  last5min:    number | null
   last5trend:  'up' | 'down' | 'stable'
-  last10min:   number
+  last10min:   number | null
   last10trend: 'up' | 'down' | 'stable'
 }
 
@@ -68,7 +68,7 @@ function Donut({ homeVal, awayVal, homeLabel, awayLabel, homeRates, awayRates, t
               <Cell fill={AWAY_COLOR} />
             </Pie>
             <Tooltip
-              formatter={(v: number) => [`${((v / total) * 100).toFixed(0)}%`]}
+              formatter={(v) => [`${(((v as number) / total) * 100).toFixed(0)}%`]}
               contentStyle={{ background: '#1f2937', border: 'none', borderRadius: 6, fontSize: 12 }}
             />
           </PieChart>
@@ -92,30 +92,30 @@ function Donut({ homeVal, awayVal, homeLabel, awayLabel, homeRates, awayRates, t
 
         {/* /min */}
         <div className="grid grid-cols-3 items-center text-center">
-          <span className="text-gray-200 text-left">{homeRates.perMin}</span>
+          <span className="text-gray-200 text-left">{homeRates.perMin || '—'}</span>
           <span className="text-gray-500 text-center">/min</span>
-          <span className="text-gray-200 text-right">{awayRates.perMin}</span>
+          <span className="text-gray-200 text-right">{awayRates.perMin || '—'}</span>
         </div>
 
         {/* 5min */}
         <div className="grid grid-cols-3 items-center text-center">
           <span className="text-gray-200 text-left flex items-center gap-0.5">
-            {homeRates.last5min} {trendIcon(homeRates.last5trend)}
+            {homeRates.last5min != null ? <>{homeRates.last5min} {trendIcon(homeRates.last5trend)}</> : <span className="text-gray-600">—</span>}
           </span>
           <span className="text-gray-500 text-center">5min</span>
           <span className="text-gray-200 text-right flex items-center justify-end gap-0.5">
-            {trendIcon(awayRates.last5trend)} {awayRates.last5min}
+            {awayRates.last5min != null ? <>{trendIcon(awayRates.last5trend)} {awayRates.last5min}</> : <span className="text-gray-600">—</span>}
           </span>
         </div>
 
         {/* 10min */}
         <div className="grid grid-cols-3 items-center text-center">
           <span className="text-gray-200 text-left flex items-center gap-0.5">
-            {homeRates.last10min} {trendIcon(homeRates.last10trend)}
+            {homeRates.last10min != null ? <>{homeRates.last10min} {trendIcon(homeRates.last10trend)}</> : <span className="text-gray-600">—</span>}
           </span>
           <span className="text-gray-500 text-center">10min</span>
           <span className="text-gray-200 text-right flex items-center justify-end gap-0.5">
-            {trendIcon(awayRates.last10trend)} {awayRates.last10min}
+            {awayRates.last10min != null ? <>{trendIcon(awayRates.last10trend)} {awayRates.last10min}</> : <span className="text-gray-600">—</span>}
           </span>
         </div>
       </div>
@@ -145,7 +145,12 @@ export function AttackDonut({ gameId, homeTeam, awayTeam }: { gameId: string; ho
     </div>
   )
 
-  if (!data) return null
+  if (!data) return (
+    <div className="rounded-xl border border-gray-800 bg-gray-900 p-4">
+      <h3 className="text-sm font-semibold text-gray-300 mb-2">⚡ Ataques ao Vivo</h3>
+      <p className="text-xs text-gray-600 text-center py-3">Aguardando estatísticas ao vivo…</p>
+    </div>
+  )
 
   const homeShort = homeTeam.split(' ')[0]
   const awayShort = awayTeam.split(' ')[0]

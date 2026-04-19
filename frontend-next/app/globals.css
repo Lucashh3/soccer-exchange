@@ -5,7 +5,7 @@
 :root {
   --background: #090b12;
   --foreground: #e8eaf0;
-  --card: #0f1827;
+  --card: rgba(255, 255, 255, 0.025);
   --card-foreground: #e8eaf0;
   --popover: #0f1520;
   --popover-foreground: #e8eaf0;
@@ -14,30 +14,36 @@
   --secondary: #151c2c;
   --secondary-foreground: #e8eaf0;
   --muted: #151c2c;
-  --muted-foreground: rgba(232, 234, 240, 0.45);
+  --muted-foreground: rgba(232, 234, 240, 0.40);
   --accent: #151c2c;
   --accent-foreground: #e8eaf0;
   --destructive: #f87171;
-  --border: rgba(255, 255, 255, 0.12);
-  --input: rgba(255, 255, 255, 0.08);
+  --border: rgba(255, 255, 255, 0.08);
+  --input: rgba(255, 255, 255, 0.06);
   --ring: #38bdf8;
-  --radius: 0.75rem;
-  --sidebar: #0c1019;
+  --radius: 1rem;
+
+  /* Sidebar */
+  --sidebar: transparent;
   --sidebar-foreground: #e8eaf0;
   --sidebar-primary: #38bdf8;
   --sidebar-primary-foreground: #090b12;
-  --sidebar-accent: #151c2c;
+  --sidebar-accent: rgba(255,255,255,0.04);
   --sidebar-accent-foreground: #e8eaf0;
   --sidebar-border: rgba(255, 255, 255, 0.06);
   --sidebar-ring: #38bdf8;
+
+  /* Market colors */
   --back-color: #38bdf8;
-  --lay-color: #fb7185;
-  --btts-color: #34d399;
+  --lay-color: #f472b6;
   --over-color: #f97316;
   --under-color: #818cf8;
   --ev-color: #a3e635;
   --lineup-color: #fbbf24;
   --danger-color: #f87171;
+
+  /* Violet accent for Coach / IA */
+  --vi: #8b5cf6;
 }
 
 @layer base {
@@ -47,6 +53,8 @@
   body {
     @apply bg-background text-foreground;
     font-family: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+    font-variant-numeric: tabular-nums;
+    -webkit-font-smoothing: antialiased;
   }
   .mono, .tabular {
     font-family: var(--font-jetbrains), ui-monospace, monospace;
@@ -54,43 +62,109 @@
   }
 }
 
-@layer utilities {
+@layer components {
+  /* Base glass — cards, panels leves */
   .glass {
-    background: rgba(15, 24, 39, 0.7);
-    backdrop-filter: blur(12px);
+    background: rgba(255, 255, 255, 0.025);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
     border: 1px solid rgba(255, 255, 255, 0.07);
+    box-shadow:
+      inset 0 1px 0 0 rgba(255, 255, 255, 0.08),
+      0 8px 32px 0 rgba(0, 0, 0, 0.28);
   }
-  .glow-back {
-    box-shadow: 0 0 12px rgba(56, 189, 248, 0.25);
+
+  /* Glass panel — sidebar, modais, painéis mais espessos */
+  .glass-panel {
+    background: rgba(255, 255, 255, 0.03);
+    backdrop-filter: blur(40px);
+    -webkit-backdrop-filter: blur(40px);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    box-shadow:
+      inset 0 1px 0 0 rgba(255, 255, 255, 0.12),
+      0 16px 48px 0 rgba(0, 0, 0, 0.4);
   }
-  .glow-lay {
-    box-shadow: 0 0 12px rgba(251, 113, 133, 0.25);
+
+  /* Glass topbar */
+  .glass-topbar {
+    background: rgba(9, 11, 18, 0.75);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    box-shadow: 0 1px 0 0 rgba(255, 255, 255, 0.04);
   }
-  .glow-btts {
-    box-shadow: 0 0 12px rgba(52, 211, 153, 0.2);
+
+  /* Section LIVE — iluminada, quente */
+  .glass-live {
+    background: rgba(255, 255, 255, 0.035);
+    backdrop-filter: blur(28px);
+    -webkit-backdrop-filter: blur(28px);
+    border: 1px solid rgba(255, 255, 255, 0.11);
+    box-shadow:
+      inset 0 1px 0 0 rgba(255, 255, 255, 0.14),
+      0 8px 32px 0 rgba(16, 185, 129, 0.06);
   }
-  .glow-over {
-    box-shadow: 0 0 12px rgba(249, 115, 22, 0.2);
+
+  /* Section ANALYSIS — opaca, fria, recua visualmente */
+  .glass-analysis {
+    background: rgba(255, 255, 255, 0.01);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid rgba(255, 255, 255, 0.04);
+    box-shadow:
+      inset 0 1px 0 0 rgba(255, 255, 255, 0.03),
+      0 4px 20px 0 rgba(0, 0, 0, 0.2);
   }
-  .flash-green {
-    animation: flashGreen 300ms ease-out;
-  }
-  .flash-red {
-    animation: flashRed 300ms ease-out;
-  }
+}
+
+@layer utilities {
+  .glow-back  { box-shadow: 0 0 14px rgba(56, 189, 248, 0.28); }
+  .glow-lay   { box-shadow: 0 0 14px rgba(244, 114, 182, 0.28); }
+  .glow-over  { box-shadow: 0 0 14px rgba(249, 115, 22, 0.22); }
+  .glow-vi    { box-shadow: 0 0 14px rgba(139, 92, 246, 0.35); }
+
+  .flash-green { animation: flashGreen 350ms ease-out; }
+  .flash-red   { animation: flashRed 350ms ease-out; }
+
   .no-scrollbar::-webkit-scrollbar { display: none; }
   .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
 }
 
+/* ── Custom scrollbar — alinhada ao design dark glass ── */
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(56, 189, 248, 0.18);
+  border-radius: 999px;
+  transition: background 200ms ease;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(56, 189, 248, 0.42);
+}
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* Firefox */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(56, 189, 248, 0.18) transparent;
+}
+
 @keyframes flashGreen {
-  0%   { background-color: rgba(52, 211, 153, 0.3); }
+  0%   { background-color: rgba(52, 211, 153, 0.28); }
   100% { background-color: transparent; }
 }
 @keyframes flashRed {
-  0%   { background-color: rgba(248, 113, 113, 0.3); }
+  0%   { background-color: rgba(248, 113, 113, 0.28); }
   100% { background-color: transparent; }
 }
 @keyframes pulseGlow {
   0%, 100% { opacity: 1; }
-  50%       { opacity: 0.55; }
+  50%       { opacity: 0.5; }
 }

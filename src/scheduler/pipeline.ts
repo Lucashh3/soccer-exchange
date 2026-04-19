@@ -6,7 +6,10 @@ import { upsertNews } from '../db/queries/signals'
 import { upsertOutcome } from '../db/queries/outcomes'
 import { updatePlayerImpact } from '../db/queries/playerImpact'
 import { matchGamesToExchange } from '../scrapers/bolsaExchange'
-import { pollAttackStats } from '../services/attackTracker'
+import { pollAttackStats, getAttackStats } from '../services/attackTracker'
+import { insertLiveSnapshot, labelSnapshotsWithResult } from '../db/queries/liveSnapshots'
+import { getDb } from '../db/schema'
+import { evaluateCoachSuggestions } from '../services/coachEvaluator'
 import type { ScrapedGame } from '../types/index'
 
 async function syncExchangeLinks(games: ScrapedGame[]): Promise<void> {
@@ -104,18 +107,12 @@ export async function runStatusUpdate(): Promise<void> {
       if (game.status === 'finished' && g.homeScore != null && g.awayScore != null) {
         upsertOutcome(game.id, g.homeScore, g.awayScore)
         updatePlayerImpact(game.id)
+        evaluateCoachSuggestions(game.id, g.homeScore, g.awayScore)
+        labelSnapshotsWithResult(game.id, g.homeScore, g.awayScore)
         outcomesRecorded++
       }
     }
     await syncExchangeLinks(scrapedGames)
-
-    // Poll attack stats for live games that have exchange event ID
-    const liveGames = scrapedGames.filter(g => {
-      const status = g.status ?? ''
-      return ['inprogress', 'live', 'halftime', 'pause'].includes(status) && g.exchangeEventId
-    })
-    await Promise.allSettled(liveGames.map(g => pollAttackStats(g.exchangeEventId!)))
-    if (liveGames.length > 0) console.log(`[pipeline] Polled attack stats for ${liveGames.length} live games`)
 
     console.log(`[pipeline] Updated status for ${scrapedGames.length} games, ${outcomesRecorded} outcomes recorded`)
   } catch (err) {
@@ -154,4 +151,66 @@ export async function runLineupCheck(): Promise<void> {
   }
 
   console.log('[pipeline] Lineup check completed')
+}
+
+export async function runAttackPoll(): Promise<void> {
+  const liveGames = getGamesToday().filter(g => {
+    const s = g.status ?? ''
+    return ['inprogress', 'live', 'halftime', 'pause'].includes(s) && g.exchangeEventId
+  })
+  if (!liveGames.length) return
+
+  await Promise.allSettled(liveGames.map(async g => {
+    const s = g.status ?? ''
+    let minute = 0
+    if (s === 'halftime') minute = 45
+    else if (s === 'finished') minute = 90
+    else if (g.kickoffAt) minute = Math.min(Math.floor((Date.now() - new Date(g.kickoffAt).getTime()) / 60000), 90)
+
+    await pollAttackStats(g.exchangeEventId!, minute)
+
+    try {
+      const attackStats = getAttackStats(g.exchangeEventId!)
+      if (!attackStats) return
+
+      // Buscar probs pré-jogo do signal_decisions
+      const priorRow = getDb().prepare(
+        `SELECT p_final_home, p_final_draw, p_final_away, meta_json FROM signal_decisions WHERE game_id = ?`
+      ).get(g.id) as { p_final_home: number; p_final_draw: number; p_final_away: number; meta_json: string | null } | undefined
+
+      let priorLambdaHome: number | null = null
+      let priorLambdaAway: number | null = null
+      if (priorRow?.meta_json) {
+        try {
+          const meta = JSON.parse(priorRow.meta_json)
+          priorLambdaHome = meta?.tfShadow?.lambdaHome ?? null
+          priorLambdaAway = meta?.tfShadow?.lambdaAway ?? null
+        } catch { /* ignorar */ }
+      }
+
+      insertLiveSnapshot({
+        gameId: g.id,
+        minute,
+        homeGoals: g.homeScore ?? 0,
+        awayGoals: g.awayScore ?? 0,
+        homeAttacksPerMin: attackStats.home.attacks.perMin,
+        homeDangerousPerMin: attackStats.home.dangerous.perMin,
+        homeLast5min: attackStats.home.attacks.last5min,
+        homeLast10min: attackStats.home.attacks.last10min,
+        homeTrend: attackStats.home.attacks.last5trend,
+        awayAttacksPerMin: attackStats.away.attacks.perMin,
+        awayDangerousPerMin: attackStats.away.dangerous.perMin,
+        awayLast5min: attackStats.away.attacks.last5min,
+        awayLast10min: attackStats.away.attacks.last10min,
+        awayTrend: attackStats.away.attacks.last5trend,
+        priorHomeWin: priorRow?.p_final_home ?? null,
+        priorDraw: priorRow?.p_final_draw ?? null,
+        priorAwayWin: priorRow?.p_final_away ?? null,
+        priorLambdaHome,
+        priorLambdaAway,
+      })
+    } catch (err) {
+      console.error(`[pipeline] Failed to save live snapshot for game ${g.id}:`, err)
+    }
+  }))
 }

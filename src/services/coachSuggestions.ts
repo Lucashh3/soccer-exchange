@@ -1,6 +1,7 @@
 import { generateReport } from '../llm'
-import { getGamesToday, getTeamStats } from '../db/queries/games'
+import { getGamesToday, getGamesByDate, getTeamStats } from '../db/queries/games'
 import { getSignalsByGameId, getNewsByGameId } from '../db/queries/signals'
+import { insertCoachSuggestion } from '../db/queries/coachHistory'
 import type { Game, TeamStats, Signal } from '../types/index'
 
 export interface CoachSuggestionItem {
@@ -14,9 +15,10 @@ export interface CoachSuggestionsResponse {
   fromCache: boolean
 }
 
-const CACHE_TTL_MS = 60 * 60 * 1000 // 1h
+// Sugestões são análise pré-jogo (xG, forma, sinais) — geradas uma vez por dia
+const CACHE_TTL_MS = 24 * 60 * 60 * 1000 // 24h
 const MIN_CONFIDENCE = 0.55
-const DIRECTIONAL_MARKETS = new Set(['backHome', 'backAway', 'layHome', 'layAway', 'over25', 'under25', 'btts'])
+const DIRECTIONAL_MARKETS = new Set(['backHome', 'backAway', 'layHome', 'layAway', 'over25', 'under25'])
 
 let cache: { response: CoachSuggestionsResponse; cachedAt: number } | null = null
 
@@ -141,6 +143,29 @@ export async function getCoachSuggestions(): Promise<CoachSuggestionsResponse> {
     console.error('[coachSuggestions] LLM error:', err instanceof Error ? err.message : err)
   }
 
+  // Persist suggestions to DB for historical tracking
+  if (suggestions.length > 0) {
+    const today = new Date().toISOString().slice(0, 10)
+    const gameMap = new Map(eligible.map((g) => [g.id, g]))
+    for (const s of suggestions) {
+      const game = gameMap.get(s.gameId)
+      if (!game || !game.topSignal) continue
+      try {
+        insertCoachSuggestion({
+          date: today,
+          gameId: s.gameId,
+          homeTeam: game.homeTeam,
+          awayTeam: game.awayTeam,
+          league: game.league,
+          market: game.topSignal.market,
+          rationale: s.rationale,
+        })
+      } catch {
+        // ignore duplicate inserts (same day re-generation)
+      }
+    }
+  }
+
   const response: CoachSuggestionsResponse = { suggestions, generatedAt: now, fromCache: false }
   cache = { response, cachedAt: now }
   return response
@@ -148,4 +173,62 @@ export async function getCoachSuggestions(): Promise<CoachSuggestionsResponse> {
 
 export function invalidateCoachSuggestionsCache(): void {
   cache = null
+}
+
+// Generates and persists suggestions for a specific past date (used for backfill)
+export async function generateSuggestionsForDate(date: string): Promise<CoachSuggestionItem[]> {
+  const allGames = getGamesByDate(date)
+  const eligible = allGames.filter((g) => {
+    if (g.status === 'scheduled' || g.status === 'notstarted') return false
+    const topConf = g.topSignal?.confidence ?? 0
+    const topMarket = g.topSignal?.market ?? ''
+    return topConf >= MIN_CONFIDENCE && DIRECTIONAL_MARKETS.has(topMarket)
+  })
+
+  if (eligible.length === 0) return []
+
+  const candidates = eligible.map((game) => {
+    const signals = getSignalsByGameId(game.id)
+      .filter((s) => DIRECTIONAL_MARKETS.has(s.market))
+      .sort((a, b) => b.confidence - a.confidence)
+    const { home: homeStats, away: awayStats } = getTeamStats(game.id)
+    const news = getNewsByGameId(game.id)
+    const newsHeadlines = news.slice(0, 3).map((n) => n.title)
+    return { game, signals, homeStats, awayStats, newsHeadlines }
+  })
+
+  const prompt = buildPrompt(candidates)
+  let suggestions: CoachSuggestionItem[] = []
+
+  try {
+    const raw = (await generateReport(prompt)).trim()
+    if (raw) {
+      const parsed = extractJsonArray(raw)
+      const eligibleIds = new Set(eligible.map((g) => g.id))
+      suggestions = parsed.filter((s) => eligibleIds.has(s.gameId))
+    }
+  } catch (err) {
+    console.error(`[coachSuggestions] LLM error for date ${date}:`, err instanceof Error ? err.message : err)
+  }
+
+  const gameMap = new Map(eligible.map((g) => [g.id, g]))
+  for (const s of suggestions) {
+    const game = gameMap.get(s.gameId)
+    if (!game || !game.topSignal) continue
+    try {
+      insertCoachSuggestion({
+        date,
+        gameId: s.gameId,
+        homeTeam: game.homeTeam,
+        awayTeam: game.awayTeam,
+        league: game.league,
+        market: game.topSignal.market,
+        rationale: s.rationale,
+      })
+    } catch {
+      // ignore duplicates
+    }
+  }
+
+  return suggestions
 }

@@ -7,7 +7,6 @@ function rowToTeamStats(row: TeamStatsRow): TeamStats {
     xgConcededAvg: row.xg_conceded_avg ?? undefined,
     goalsScoredAvg: row.goals_scored_avg ?? undefined,
     goalsConcededAvg: row.goals_conceded_avg ?? undefined,
-    bttsPct: row.btts_pct ?? undefined,
     over25Pct: row.over25_pct ?? undefined,
     under25Pct: row.under25_pct ?? undefined,
     formLast5: row.form_last5 ?? undefined,
@@ -178,6 +177,46 @@ export function getGamesToday(filters?: GetGamesTodayFilters): Game[] {
     top_conf: number
   })[]
 
+  if (rows.length === 0) return []
+
+  // Batch-fetch all team stats in one query (2 queries total, not N+1)
+  const ids = rows.map(r => r.id)
+  const placeholders = ids.map(() => '?').join(',')
+  const statsRows = db.prepare(
+    `SELECT * FROM team_stats WHERE game_id IN (${placeholders})`
+  ).all(...ids) as TeamStatsRow[]
+
+  const statsMap: Record<string, { home: TeamStats | null; away: TeamStats | null }> = {}
+  for (const sr of statsRows) {
+    if (!statsMap[sr.game_id]) statsMap[sr.game_id] = { home: null, away: null }
+    if (sr.side === 'home') statsMap[sr.game_id].home = rowToTeamStats(sr)
+    else statsMap[sr.game_id].away = rowToTeamStats(sr)
+  }
+
+  return rows.map(row => ({
+    ...rowToGame(row),
+    homeStats: statsMap[row.id]?.home ?? null,
+    awayStats: statsMap[row.id]?.away ?? null,
+  }))
+}
+
+export function getGamesByDate(date: string): Game[] {
+  const db = getDb()
+  const start = `${date}T00:00:00.000Z`
+  const end   = `${date}T23:59:59.999Z`
+  const rows = db.prepare(`
+    SELECT
+      g.*,
+      COUNT(s.id) AS signal_count,
+      (SELECT market FROM signals WHERE game_id = g.id ORDER BY confidence DESC LIMIT 1) AS top_market,
+      (SELECT probability FROM signals WHERE game_id = g.id ORDER BY confidence DESC LIMIT 1) AS top_prob,
+      (SELECT confidence FROM signals WHERE game_id = g.id ORDER BY confidence DESC LIMIT 1) AS top_conf
+    FROM games g
+    LEFT JOIN signals s ON s.game_id = g.id
+    WHERE g.kickoff_at >= ? AND g.kickoff_at <= ?
+    GROUP BY g.id
+    ORDER BY g.kickoff_at ASC
+  `).all(start, end) as (GameRow & { signal_count: number; top_market: string; top_prob: number; top_conf: number })[]
   return rows.map(rowToGame)
 }
 
@@ -190,13 +229,13 @@ export function upsertTeamStats(
   db.prepare(`
     INSERT INTO team_stats (
       game_id, side, xg_avg, xg_conceded_avg, goals_scored_avg, goals_conceded_avg,
-      btts_pct, over25_pct, under25_pct, form_last5, form_last10,
+      over25_pct, under25_pct, form_last5, form_last10,
       corners_avg, cards_avg, possession_avg, shots_avg, shots_on_target_avg,
       goals_scored_std, goals_conceded_std, xg_std, big_chances_created_avg, big_chances_conceded_avg,
       updated_at
     ) VALUES (
       @gameId, @side, @xgAvg, @xgConcededAvg, @goalsScoredAvg, @goalsConcededAvg,
-      @bttsPct, @over25Pct, @under25Pct, @formLast5, @formLast10,
+      @over25Pct, @under25Pct, @formLast5, @formLast10,
       @cornersAvg, @cardsAvg, @possessionAvg, @shotsAvg, @shotsOnTargetAvg,
       @goalsScoredStd, @goalsConcededStd, @xgStd, @bigChancesCreatedAvg, @bigChancesConcededAvg,
       datetime('now')
@@ -206,7 +245,6 @@ export function upsertTeamStats(
       xg_conceded_avg = excluded.xg_conceded_avg,
       goals_scored_avg = excluded.goals_scored_avg,
       goals_conceded_avg = excluded.goals_conceded_avg,
-      btts_pct = excluded.btts_pct,
       over25_pct = excluded.over25_pct,
       under25_pct = excluded.under25_pct,
       form_last5 = excluded.form_last5,
@@ -229,7 +267,6 @@ export function upsertTeamStats(
     xgConcededAvg: stats.xgConcededAvg ?? null,
     goalsScoredAvg: stats.goalsScoredAvg ?? null,
     goalsConcededAvg: stats.goalsConcededAvg ?? null,
-    bttsPct: stats.bttsPct ?? null,
     over25Pct: stats.over25Pct ?? null,
     under25Pct: stats.under25Pct ?? null,
     formLast5: stats.formLast5 ?? null,

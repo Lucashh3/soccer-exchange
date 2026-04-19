@@ -34,7 +34,6 @@ export function buildTeamStatsFromSofascore(raw: Record<string, unknown>): TeamS
     xgConcededAvg: raw.xgConcededAvg !== undefined ? parseNumber(raw.xgConcededAvg) : undefined,
     goalsScoredAvg: raw.goalsScoredAvg !== undefined ? parseNumber(raw.goalsScoredAvg) : undefined,
     goalsConcededAvg: raw.goalsConcededAvg !== undefined ? parseNumber(raw.goalsConcededAvg) : undefined,
-    bttsPct: raw.bttsPct !== undefined ? parsePct(raw.bttsPct) : undefined,
     over25Pct: raw.over25Pct !== undefined ? parsePct(raw.over25Pct) : undefined,
     under25Pct: raw.under25Pct !== undefined ? parsePct(raw.under25Pct) : undefined,
     formLast5: raw.formLast5 !== undefined ? parseForm(raw.formLast5) : undefined,

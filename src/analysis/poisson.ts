@@ -41,14 +41,12 @@ export function computeProbabilities(matrix: number[][]): {
   homeWin: number
   draw: number
   awayWin: number
-  btts: number
   over25: number
   under25: number
 } {
   let homeWin = 0
   let draw = 0
   let awayWin = 0
-  let btts = 0
   let over25 = 0
   let under25 = 0
 
@@ -62,11 +60,10 @@ export function computeProbabilities(matrix: number[][]): {
       else if (i === j) draw += p
       else awayWin += p
 
-      if (i > 0 && j > 0) btts += p
       if (totalGoals > 2.5) over25 += p
       if (totalGoals <= 2.5) under25 += p
     }
   }
 
-  return { homeWin, draw, awayWin, btts, over25, under25 }
+  return { homeWin, draw, awayWin, over25, under25 }
 }

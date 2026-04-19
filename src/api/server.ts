@@ -2,6 +2,7 @@ import express, { Request, Response, NextFunction } from 'express'
 import { initDb, getDb } from '../db/schema'
 import gamesRouter from './routes/games'
 import signalsRouter from './routes/signals'
+import authRouter from './routes/auth'
 import { errorHandler } from './middleware/errorHandler'
 
 export const app = express()
@@ -62,6 +63,9 @@ app.get('/health', (_req, res) => {
     })
   }
 })
+
+// Auth routes — públicas (sem API key)
+app.use('/auth', authRouter)
 
 // Routes (protegidas por API key quando API_KEY estiver configurada)
 app.use('/games', authMiddleware, gamesRouter)

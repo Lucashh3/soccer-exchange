@@ -22,7 +22,6 @@ function marketLabel(market: string | null): string | null {
     layAway: 'Lay Visitante',
     over25: 'Over 2.5',
     under25: 'Under 2.5',
-    btts: 'BTTS',
   }
 
   return map[market] ?? market
